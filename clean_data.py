@@ -568,4 +568,4 @@ else:
     print(nan_check[nan_check > 0])
 
 print(f"\nDa luu: {OUTPUT_PATH}")
-print("Buoc tiep theo: chay train_model.py")
+print("Tiep theo: chay python train_model.py")

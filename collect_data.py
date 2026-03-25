@@ -70,14 +70,14 @@ def download_season(season: str) -> pd.DataFrame | None:
         # Bỏ hàng không có kết quả (cuối file hay có hàng trống)
         df = df.dropna(subset=["FTR", "HomeTeam", "AwayTeam"])
 
-        print(f"  ✅ {label}: {len(df)} trận")
+        print(f"  [OK] {label}: {len(df)} tran")
         return df
 
     except requests.exceptions.HTTPError:
-        print(f"  ⚠️  {label}: Chưa có dữ liệu (mùa chưa bắt đầu hoặc URL sai)")
+        print(f"  [WAIT] {label}: Chua co du lieu (mua chua bat dau hoac URL sai)")
         return None
     except Exception as e:
-        print(f"  ❌ {label}: Lỗi - {e}")
+        print(f"  [ERROR] {label}: Loi - {e}")
         return None
 
 
@@ -87,7 +87,7 @@ def main():
     os.makedirs(SEASONS_DIR, exist_ok=True)
 
     print("=" * 55)
-    print("  EPL Data Collector — football-data.co.uk")
+    print("  EPL Data Collector - football-data.co.uk")
     print("=" * 55)
 
     all_seasons = []
@@ -96,57 +96,58 @@ def main():
         df = download_season(season)
 
         if df is not None and len(df) > 0:
-            # Lưu từng mùa riêng
+            # Luu tung mua rieng
             label = f"20{season[:2]}_{season[2:]}"
             path = f"{SEASONS_DIR}/epl_{label}.csv"
             df.to_csv(path, index=False)
 
             all_seasons.append(df)
 
-        time.sleep(0.5)  # Tránh spam server
+        time.sleep(0.5)  # Tranh spam server
 
     if not all_seasons:
-        print("\n❌ Không download được dữ liệu nào!")
+        print("\n[ERROR] Khong download duoc du lieu nao!")
         return
 
-    # Gộp tất cả mùa
+    # Gop tat ca mua
     df_all = pd.concat(all_seasons, ignore_index=True)
 
-    # Parse ngày tháng
+    # Parse ngay thang
     df_all["Date"] = pd.to_datetime(df_all["Date"], format="mixed", dayfirst=True, errors="coerce")
 
-    # Sắp xếp theo thời gian
+    # Sap xep theo thoi gian
     df_all = df_all.sort_values("Date").reset_index(drop=True)
 
-    # Lưu file gộp
+    # Luu file gop
     raw_path = f"{OUTPUT_DIR}/epl_raw.csv"
     df_all.to_csv(raw_path, index=False)
 
-    # ── Thống kê ──────────────────────────────────────────────────────────────
+    # ── Thong ke ──────────────────────────────────────────────────────────────
     print()
     print("=" * 55)
-    print("  📊 THỐNG KÊ DỮ LIỆU ĐÃ DOWNLOAD")
+    print("  THONG KE DU LIEU DA DOWNLOAD")
     print("=" * 55)
-    print(f"  Tổng số trận    : {len(df_all):,}")
-    print(f"  Số mùa giải     : {df_all['Season'].nunique()}")
-    print(f"  Số đội          : {df_all['HomeTeam'].nunique()}")
-    print(f"  Từ ngày         : {df_all['Date'].min().date()}")
-    print(f"  Đến ngày        : {df_all['Date'].max().date()}")
+    print(f"  Tong so tran    : {len(df_all):,}")
+    print(f"  So mua giai     : {df_all['Season'].nunique()}")
+    print(f"  So doi          : {df_all['HomeTeam'].nunique()}")
+    print(f"  Tu ngay         : {df_all['Date'].min().date()}")
+    print(f"  Den ngay        : {df_all['Date'].max().date()}")
     print()
-    print("  Phân bổ kết quả:")
+    print("  Phan bo ket qua:")
     result_counts = df_all["FTR"].value_counts()
     total = len(df_all)
     for label, count in result_counts.items():
         name = {"H": "Home Win", "D": "Draw", "A": "Away Win"}[label]
         pct = count / total * 100
-        bar = "█" * int(pct / 2)
+        # Use simple bar
+        bar = "#" * int(pct / 2)
         print(f"    {name:12s}: {count:4d} ({pct:.1f}%) {bar}")
     print()
-    print(f"  ✅ Đã lưu: {raw_path}")
-    print(f"  ✅ Từng mùa: {SEASONS_DIR}/")
+    print(f"  [DONE] Da luu: {raw_path}")
+    print(f"  [DONE] Tung mua tai: {SEASONS_DIR}/")
     print("=" * 55)
     print()
-    print("  👉 Bước tiếp theo: chạy clean_data.py")
+    print("  Tiep theo: chay python clean_data.py")
     print("=" * 55)
 
 

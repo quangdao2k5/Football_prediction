@@ -1,5 +1,5 @@
-model,val_acc,val_loss
-Logistic Regression,0.5263,0.9669
-Random Forest (calibrated),0.5474,0.9363
-XGBoost (calibrated),0.5158,0.9736
-Gradient Boosting (calibrated),0.5184,0.9842
+model,val_acc
+Logistic Regression,0.5579
+Random Forest (calibrated),0.5553
+XGBoost (calibrated),0.5544
+Gradient Boosting (calibrated),0.5509
