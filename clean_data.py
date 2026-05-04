@@ -24,7 +24,7 @@ ELO_DEFAULT = 1500
 # ------------------------------------------------------------------------------
 
 df = pd.read_csv(INPUT_PATH)
-df["Date"] = pd.to_datetime(df["Date"], format="mixed", dayfirst=True, errors="coerce")
+df["Date"] = pd.to_datetime(df["Date"], format="%Y-%m-%d", errors="coerce")
 df = df.dropna(subset=["Date", "HomeTeam", "AwayTeam", "FTR"])
 df = df.sort_values("Date").reset_index(drop=True)
 

@@ -20,7 +20,7 @@ app = FastAPI(title="EPL Predictor API")
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173", "http://localhost:3000"],
+    allow_origins=["http://localhost:5173", "http://localhost:5174", "http://localhost:3000"],
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -66,7 +66,8 @@ def get_latest_predictions():
         except:
             return 0
 
-    latest = max(files, key=extract_gw)
+    # Lay file predictions moi nhat theo thoi gian sua (khong dung so GW)
+    latest = max(files, key=os.path.getmtime)
     gw     = extract_gw(latest)
     df     = pd.read_csv(latest)
 

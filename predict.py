@@ -346,6 +346,9 @@ def predict_gameweek(fixtures, gameweek, season="2025/26"):
 def load_latest_fixtures():
     """
     Tim file fixtures moi nhat trong thu muc predictions/.
+    Uu tien file duoc tao/cap nhat gan nhat (theo thoi gian sua file),
+    khong dung so gameweek vi tran da bu co the co so GW nho hon.
+
     Tra ve (fixtures_list, gameweek) hoac (None, None) neu khong tim thay.
     """
     import glob
@@ -354,17 +357,19 @@ def load_latest_fixtures():
     if not fix_files:
         return None, None
 
-    # Lay file co so gameweek lon nhat
     def extract_gw(path):
         try:
             return int(os.path.basename(path).replace("gw", "").replace("_fixtures.csv", ""))
         except:
             return 0
 
-    latest   = max(fix_files, key=extract_gw)
+    # Lay file fixtures duoc sua GAN NHAT (file vua duoc fetch_fixtures.py tao)
+    latest   = max(fix_files, key=os.path.getmtime)
     gw       = extract_gw(latest)
     df_fix   = pd.read_csv(latest)
     fixtures = df_fix[["home", "away", "date"]].to_dict(orient="records")
+
+    print(f"[INFO] Dang dung file: {latest} (GW{gw}, {len(fixtures)} tran)")
 
     return fixtures, gw
 

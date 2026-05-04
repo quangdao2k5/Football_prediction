@@ -81,8 +81,13 @@ print()
 #
 # Logic: Tim tat ca file du doan (gw*_predictions.csv), sau do kiem tra
 # xem gameweek nao da co ket qua thuc te trong epl_clean.csv nhung chua
-# duoc ghi vao accuracy_log.csv
+# duoc ghi vao accuracy_log.csv.
+#
+# THEM: Re-check cac gameweek da log nhung chua du 10 tran (do chay
+# retrain truoc khi tat ca cac tran trong GW da ket thuc).
 # ------------------------------------------------------------------------------
+
+EXPECTED_MATCHES_PER_GW = 10   # EPL luon co 10 tran / gameweek
 
 def get_completed_gameweeks():
     """
@@ -108,6 +113,19 @@ def get_logged_gameweeks():
     return df_log["gameweek"].tolist()
 
 
+def get_incomplete_gameweeks():
+    """
+    Lay danh sach gameweek da log nhung chua du 10 tran.
+    Nhung GW nay can duoc re-check vi co the luc truoc chay retrain
+    khi 1 so tran chua co ket qua.
+    """
+    if not os.path.exists(ACCURACY_LOG):
+        return []
+    df_log = pd.read_csv(ACCURACY_LOG)
+    incomplete = df_log[df_log["total"] < EXPECTED_MATCHES_PER_GW]["gameweek"].tolist()
+    return incomplete
+
+
 def find_actual_result(df_clean, home, away, season="2025/26"):
     """
     Tim ket qua thuc te cua tran dau trong epl_clean.csv.
@@ -123,28 +141,16 @@ def find_actual_result(df_clean, home, away, season="2025/26"):
     return match.iloc[0]["FTR"]
 
 
-# ------------------------------------------------------------------------------
-# 3. So sanh du doan vs thuc te cho tung gameweek chua duoc log
-# ------------------------------------------------------------------------------
-
-completed_gws = get_completed_gameweeks()
-logged_gws    = get_logged_gameweeks()
-pending_gws   = [gw for gw in completed_gws if gw not in logged_gws]
-
-season_live = "2025/26"   # mua dang du doan
-
-if not pending_gws:
-    print("Khong co gameweek moi nao can so sanh accuracy.")
-    print(f"  Da log: {logged_gws}")
-else:
-    print(f"Phat hien {len(pending_gws)} gameweek can so sanh: {pending_gws}")
-    print()
-
-accuracy_rows = []
-
-for gw in pending_gws:
+def evaluate_gameweek(gw, season):
+    """
+    Danh gia accuracy cho 1 gameweek.
+    Tra ve dict {gameweek, correct, total, accuracy} hoac None neu chua co ket qua.
+    """
     pred_path = f"predictions/gw{gw}_predictions.csv"
-    df_pred   = pd.read_csv(pred_path)
+    if not os.path.exists(pred_path):
+        return None
+
+    df_pred = pd.read_csv(pred_path)
 
     print(f"Gameweek {gw} — So sanh du doan vs thuc te")
     print("=" * 72)
@@ -153,17 +159,15 @@ for gw in pending_gws:
 
     correct = 0
     total   = 0
-    details = []
 
     for _, row in df_pred.iterrows():
         home      = row["home"]
         away      = row["away"]
         predicted = row["prediction"]
 
-        actual_ftr = find_actual_result(df, home, away, season_live)
+        actual_ftr = find_actual_result(df, home, away, season)
 
         if actual_ftr is None:
-            # Tran nay chua co ket qua (chua da hoac du lieu chua cap nhat)
             print(f"  {home:22s} {away:22s} {predicted:12s} {'[Chua co]':12s}")
             continue
 
@@ -176,37 +180,71 @@ for gw in pending_gws:
         status = "OK" if is_correct else "WRONG"
         print(f"  {home:22s} {away:22s} {predicted:12s} {actual_lbl:12s} {status}")
 
-        details.append({
-            "gameweek":  gw,
-            "home":      home,
-            "away":      away,
-            "predicted": predicted,
-            "actual":    actual_lbl,
-            "correct":   int(is_correct),
-        })
-
     if total == 0:
         print("  Chua co ket qua thuc te nao cho gameweek nay.")
         print()
-        continue
+        return None
 
     acc = correct / total
     print("-" * 72)
     print(f"  Dung: {correct}/{total} tran  |  Accuracy GW{gw}: {acc*100:.1f}%")
+    if total < EXPECTED_MATCHES_PER_GW:
+        print(f"  [CANH BAO] Chi co {total}/{EXPECTED_MATCHES_PER_GW} tran co ket qua — se re-check lan sau.")
     print()
 
-    accuracy_rows.append({
+    return {
         "gameweek": gw,
         "correct":  correct,
         "total":    total,
         "accuracy": round(acc, 4),
-    })
+    }
 
-# Luu accuracy log
+
+# ------------------------------------------------------------------------------
+# 3. So sanh du doan vs thuc te cho:
+#    a) Gameweek chua duoc log (moi)
+#    b) Gameweek da log nhung chua du 10 tran (can cap nhat)
+# ------------------------------------------------------------------------------
+
+completed_gws  = get_completed_gameweeks()
+logged_gws     = get_logged_gameweeks()
+incomplete_gws = get_incomplete_gameweeks()
+pending_gws    = [gw for gw in completed_gws if gw not in logged_gws]
+
+season_live = "2025/26"   # mua dang du doan
+
+# Re-check cac GW chua du tran
+if incomplete_gws:
+    print(f"[RE-CHECK] Phat hien {len(incomplete_gws)} gameweek chua du {EXPECTED_MATCHES_PER_GW} tran: {incomplete_gws}")
+    print(f"  Se danh gia lai voi du lieu moi nhat...")
+    print()
+
+if not pending_gws and not incomplete_gws:
+    print("Khong co gameweek moi nao can so sanh accuracy.")
+    print(f"  Da log: {logged_gws}")
+else:
+    if pending_gws:
+        print(f"Phat hien {len(pending_gws)} gameweek moi can so sanh: {pending_gws}")
+        print()
+
+# Gop tat ca GW can xu ly (moi + chua du tran), bo trung
+all_gws_to_eval = sorted(set(pending_gws + incomplete_gws))
+
+accuracy_rows = []
+
+for gw in all_gws_to_eval:
+    result = evaluate_gameweek(gw, season_live)
+    if result is not None:
+        accuracy_rows.append(result)
+
+# Luu accuracy log — cap nhat ca GW moi va GW da duoc re-check
 if accuracy_rows:
     if os.path.exists(ACCURACY_LOG):
         df_acc_log = pd.read_csv(ACCURACY_LOG)
-        df_acc_log = pd.concat(
+        # Xoa cac GW se duoc cap nhat (re-check) de thay bang ket qua moi
+        updated_gws = [r["gameweek"] for r in accuracy_rows]
+        df_acc_log  = df_acc_log[~df_acc_log["gameweek"].isin(updated_gws)]
+        df_acc_log  = pd.concat(
             [df_acc_log, pd.DataFrame(accuracy_rows)], ignore_index=True
         )
     else:

@@ -42,7 +42,7 @@ NAME_MAP = {
     "Tottenham Hotspur FC"      : "Tottenham",
     "Newcastle United FC"       : "Newcastle United",
     "Aston Villa FC"            : "Aston Villa",
-    "West Ham United FC"        : "West Ham United",
+    "West Ham United FC"        : "West Ham",
     "Brighton & Hove Albion FC" : "Brighton",
     "Wolverhampton Wanderers FC": "Wolverhampton",
     "Fulham FC"                 : "Fulham",
@@ -115,8 +115,49 @@ def fetch_next_fixtures():
         })
 
     df_fix  = pd.DataFrame(rows)
-    next_gw = df_fix["gameweek"].min()
-    df_next = df_fix[df_fix["gameweek"] == next_gw].reset_index(drop=True)
+
+    # ---------------------------------------------------------------
+    # Chon gameweek tiep theo dua tren ngay thi dau SOM NHAT,
+    # khong dung min(gameweek) vi tran da bu co the co so GW nho hon.
+    #
+    # Logic:
+    # 1. Tim ngay thi dau som nhat trong tat ca cac tran scheduled
+    # 2. Lay gameweek chua ngay som nhat do
+    # 3. Neu gameweek do chi co 1-2 tran (tran da bu) va gameweek ke
+    #    tiep co nhieu tran hon va dien ra trong vong 7 ngay,
+    #    thi uu tien gameweek day du hon.
+    # ---------------------------------------------------------------
+    df_fix["date_parsed"] = pd.to_datetime(df_fix["date"])
+
+    # Tim gameweek co tran dau som nhat
+    gw_min_dates = df_fix.groupby("gameweek").agg(
+        min_date=("date_parsed", "min"),
+        count=("home", "count")
+    ).sort_values("min_date")
+
+    first_gw     = gw_min_dates.index[0]
+    first_count  = gw_min_dates.iloc[0]["count"]
+    first_date   = gw_min_dates.iloc[0]["min_date"]
+
+    # Neu gameweek dau tien chi co 1-2 tran (tran da bu),
+    # kiem tra gameweek ke tiep
+    if first_count <= 2 and len(gw_min_dates) > 1:
+        second_gw    = gw_min_dates.index[1]
+        second_count = gw_min_dates.iloc[1]["count"]
+        second_date  = gw_min_dates.iloc[1]["min_date"]
+
+        # Neu GW ke tiep co nhieu tran hon va da truoc tran da bu,
+        # hoac chi cach vài ngay => uu tien GW day du
+        if second_count >= 5 and second_date <= first_date:
+            next_gw = second_gw
+            print(f"[INFO] Bo qua GW{first_gw} ({first_count} tran da bu, ngay {first_date.strftime('%Y-%m-%d')})")
+            print(f"[INFO] Chon GW{second_gw} ({second_count} tran, ngay {second_date.strftime('%Y-%m-%d')})")
+        else:
+            next_gw = first_gw
+    else:
+        next_gw = first_gw
+
+    df_next = df_fix[df_fix["gameweek"] == next_gw][["gameweek", "home", "away", "date"]].reset_index(drop=True)
 
     print(f"Gameweek tiep theo: GW{next_gw} ({len(df_next)} tran)")
     print()

@@ -114,7 +114,7 @@ def main():
     df_all = pd.concat(all_seasons, ignore_index=True)
 
     # Parse ngay thang
-    df_all["Date"] = pd.to_datetime(df_all["Date"], format="mixed", dayfirst=True, errors="coerce")
+    df_all["Date"] = pd.to_datetime(df_all["Date"], format="%Y-%m-%d", errors="coerce")
 
     # Sap xep theo thoi gian
     df_all = df_all.sort_values("Date").reset_index(drop=True)
