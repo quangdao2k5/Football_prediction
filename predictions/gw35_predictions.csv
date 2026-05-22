@@ -1,11 +1,11 @@
-gameweek,home,away,date,home_win%,draw%,away_win%,prediction
-35,Leeds United,Burnley,2026-05-01,59.8,23.1,17.1,Home Win
-35,Brentford,West Ham,2026-05-02,54.5,25.8,19.7,Home Win
-35,Newcastle United,Brighton,2026-05-02,42.4,29.7,27.9,Home Win
-35,Wolverhampton,Sunderland,2026-05-02,33.2,31.2,35.6,Away Win
-35,Arsenal,Fulham,2026-05-02,67.9,21.1,11.0,Home Win
-35,Bournemouth,Crystal Palace,2026-05-03,45.7,28.1,26.2,Home Win
-35,Manchester United,Liverpool,2026-05-03,38.7,27.4,33.9,Home Win
-35,Aston Villa,Tottenham,2026-05-03,65.8,21.4,12.9,Home Win
-35,Chelsea,Nott'm Forest,2026-05-04,47.3,31.9,20.9,Home Win
-35,Everton,Manchester City,2026-05-04,24.5,28.2,47.2,Away Win
+gameweek,home,away,date,home_win%,draw%,away_win%,prediction,home_elo,away_elo,home_form_str,away_form_str,home_gf,away_gf,home_ga,away_ga,home_cs,away_cs,h2h_str
+35,Leeds United,Burnley,2026-05-01,69.1,12.2,18.7,Home Win,1518.8,1387.1,D D W W D,D L L L L,1.4,0.4,0.6,2.0,0.6,0.2,Thắng 3 - Hòa 1 - Thua 1
+35,Brentford,West Ham,2026-05-02,58.7,22.1,19.2,Home Win,1585.4,1510.6,D D D D L,D L W D W,1.0,1.4,1.2,0.8,0.4,0.4,Thắng 4 - Hòa 1 - Thua 1
+35,Newcastle United,Brighton,2026-05-02,38.1,29.5,32.4,Draw,1570.7,1606.0,W L L L L,W W W D W,0.8,2.0,1.4,0.6,0.2,0.6,Thắng 1 - Hòa 2 - Thua 3
+35,Wolverhampton,Sunderland,2026-05-02,40.2,26.9,32.9,Draw,1442.9,1495.1,W D L L L,L W W L L,0.8,1.2,2.2,2.2,0.0,0.2,Thắng 0 - Hòa 0 - Thua 1
+35,Arsenal,Fulham,2026-05-02,69.5,17.5,13.0,Home Win,1747.9,1554.9,W W L L W,D W L D W,1.2,0.8,0.8,0.6,0.6,0.6,Thắng 3 - Hòa 2 - Thua 1
+35,Bournemouth,Crystal Palace,2026-05-03,46.4,26.6,27.1,Home Win,1605.3,1569.6,D D W W D,W D W D L,1.6,1.2,1.2,1.0,0.2,0.4,Thắng 2 - Hòa 3 - Thua 1
+35,Manchester United,Liverpool,2026-05-03,38.1,26.2,35.7,Away Win,1623.0,1680.1,W D L W W,D L W W W,1.8,1.8,1.2,1.0,0.2,0.2,Thắng 1 - Hòa 3 - Thua 2
+35,Aston Villa,Tottenham,2026-05-03,66.2,18.9,15.0,Home Win,1649.8,1467.3,L W D W L,D L L D W,1.6,0.8,1.6,1.4,0.2,0.2,Thắng 4 - Hòa 0 - Thua 2
+35,Chelsea,Nott'm Forest,2026-05-04,37.4,33.9,28.7,Draw,1610.5,1542.0,L L L L L,D W D W W,0.0,2.6,2.2,0.4,0.0,0.6,Thắng 3 - Hòa 2 - Thua 1
+35,Everton,Manchester City,2026-05-04,14.4,20.4,65.2,Away Win,1581.8,1758.5,L W D L L,D D W W W,1.4,1.8,1.6,0.8,0.2,0.4,Thắng 0 - Hòa 1 - Thua 5

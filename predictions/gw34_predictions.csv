@@ -1,11 +1,11 @@
-gameweek,home,away,date,home_win%,draw%,away_win%,prediction
-34,Brighton,Chelsea,2026-04-21,39.3,27.7,33.0,Home Win
-34,Bournemouth,Leeds United,2026-04-22,52.7,25.1,22.2,Home Win
-34,Burnley,Manchester City,2026-04-22,4.9,35.1,60.0,Away Win
-34,Sunderland,Nott'm Forest,2026-04-24,41.7,18.4,39.9,Home Win
-34,Fulham,Aston Villa,2026-04-25,37.1,28.6,34.3,Home Win
-34,Liverpool,Crystal Palace,2026-04-25,62.7,21.6,15.7,Home Win
-34,West Ham,Everton,2026-04-25,23.7,36.6,39.7,Away Win
-34,Wolverhampton,Tottenham,2026-04-25,30.4,34.3,35.3,Away Win
-34,Arsenal,Newcastle United,2026-04-25,78.1,10.8,11.1,Home Win
-34,Manchester United,Brentford,2026-04-27,51.5,22.2,26.2,Home Win
+gameweek,home,away,date,home_win%,draw%,away_win%,prediction,home_elo,away_elo,home_form_str,away_form_str,home_gf,away_gf,home_ga,away_ga,home_cs,away_cs,h2h_str
+34,Brighton,Chelsea,2026-04-21,36.2,19.2,44.7,Away Win,1609.9,1620.7,L W W W D,W L L L L,1.4,0.8,0.8,1.8,0.4,0.0,Thắng 3 - Hòa 0 - Thua 3
+34,Bournemouth,Leeds United,2026-04-22,52.6,25.8,21.6,Home Win,1595.7,1510.5,D D D W W,L D D W W,1.2,1.0,0.8,0.4,0.4,0.6,Thắng 1 - Hòa 1 - Thua 1
+34,Burnley,Manchester City,2026-04-22,11.8,14.7,73.5,Away Win,1393.2,1748.2,L D L L L,W D D W W,0.4,1.8,2.2,0.8,0.2,0.4,Thắng 0 - Hòa 0 - Thua 6
+34,Sunderland,Nott'm Forest,2026-04-24,45.6,24.0,30.4,Home Win,1501.2,1535.9,W L W W L,D D W D W,1.4,2.0,1.2,0.8,0.4,0.4,Thắng 1 - Hòa 0 - Thua 0
+34,Fulham,Aston Villa,2026-04-25,34.4,22.5,43.0,Away Win,1554.0,1643.7,L D W L D,L L W D W,0.6,1.8,0.8,2.2,0.4,0.2,Thắng 0 - Hòa 0 - Thua 6
+34,Liverpool,Crystal Palace,2026-04-25,60.3,22.4,17.3,Home Win,1672.4,1571.4,L D L W W,L W D W D,1.4,1.2,1.2,0.8,0.2,0.4,Thắng 2 - Hòa 2 - Thua 2
+34,West Ham,Everton,2026-04-25,29.7,22.5,47.8,Away Win,1508.8,1589.5,W D L W D,W L W D L,1.2,1.6,0.6,1.2,0.6,0.4,Thắng 2 - Hòa 3 - Thua 1
+34,Wolverhampton,Tottenham,2026-04-25,35.0,27.0,38.0,Away Win,1451.2,1463.3,W W D L L,L D L L D,1.2,0.8,2.0,2.0,0.2,0.0,Thắng 4 - Hòa 2 - Thua 0
+34,Arsenal,Newcastle United,2026-04-25,70.3,16.1,13.6,Home Win,1758.2,1580.3,W W W L L,W W L L L,1.4,1.2,1.0,1.4,0.4,0.2,Thắng 4 - Hòa 0 - Thua 2
+34,Manchester United,Brentford,2026-04-27,46.5,28.1,25.4,Home Win,1612.7,1586.3,L W D L W,D D D D D,1.6,0.8,1.4,0.8,0.2,0.6,Thắng 3 - Hòa 1 - Thua 2

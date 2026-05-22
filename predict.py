@@ -141,43 +141,76 @@ def get_sot_avg(df, team, n=FORM_N):
     return float(np.mean(sots)) if sots else 4.0
 
 
-def get_h2h_winrate(df, home, away, n=6):
-    """Tinh ti le thang lich su cua doi nha khi gap doi khach."""
+def get_h2h_dominance(df, home, away, n=6):
+    """Tinh net dominance cua doi nha trong lich su doi dau (doi xung).
+    Gia tri tu -1.0 (away thong tri) den +1.0 (home thong tri)."""
     h2h = df[
         ((df["HomeTeam"] == home) & (df["AwayTeam"] == away)) |
         ((df["HomeTeam"] == away) & (df["AwayTeam"] == home))
     ].tail(n)
 
     if len(h2h) == 0:
-        return 0.45
+        return 0.0  # Trung lap — khong thien vi san nha
 
-    wins = 0
+    home_wins = 0
+    away_wins = 0
     for _, row in h2h.iterrows():
         if row["HomeTeam"] == home and row["FTR"] == "H":
-            wins += 1
+            home_wins += 1
         elif row["AwayTeam"] == home and row["FTR"] == "A":
-            wins += 1
+            home_wins += 1
+        elif row["FTR"] != "D":
+            away_wins += 1
 
-    return round(wins / len(h2h), 4)
-
-
-def get_home_advantage(df, team, n=20):
-    """Ti le thang san nha lich su cua doi."""
-    home_games = df[df["HomeTeam"] == team].tail(n)
-    if len(home_games) == 0:
-        return 0.45
-    wins = (home_games["FTR"] == "H").sum()
-    return round(wins / len(home_games), 4)
+    return round((home_wins - away_wins) / len(h2h), 4)
 
 
-def get_rest_days(df, team, match_date):
-    """So ngay nghi giua tran truoc va tran nay."""
-    past = df[(df["HomeTeam"] == team) | (df["AwayTeam"] == team)]
-    past = past[past["Date"] < match_date]
-    if len(past) == 0:
-        return 7
-    last_date = past.iloc[-1]["Date"]
-    return (match_date - last_date).days
+def get_recent_form_string(df, team, n=5):
+    """Tra ve chuoi dang W D L W W cho n tran gan nhat."""
+    games = df[(df["HomeTeam"] == team) | (df["AwayTeam"] == team)].tail(n)
+    if len(games) == 0:
+        return "N/A"
+    
+    res = []
+    for _, row in games.iterrows():
+        if row["HomeTeam"] == team:
+            if row["FTR"] == "H": res.append("W")
+            elif row["FTR"] == "D": res.append("D")
+            else: res.append("L")
+        else:
+            if row["FTR"] == "A": res.append("W")
+            elif row["FTR"] == "D": res.append("D")
+            else: res.append("L")
+    return " ".join(res)
+
+
+def get_h2h_stats(df, home, away, n=6):
+    """Tra ve chuoi Thang-Hoa-Thua cua doi nha khi gap doi khach."""
+    h2h = df[
+        ((df["HomeTeam"] == home) & (df["AwayTeam"] == away)) |
+        ((df["HomeTeam"] == away) & (df["AwayTeam"] == home))
+    ].tail(n)
+
+    if len(h2h) == 0:
+        return "N/A"
+
+    home_wins = 0
+    draws = 0
+    away_wins = 0
+    for _, row in h2h.iterrows():
+        if row["FTR"] == "D":
+            draws += 1
+        elif row["HomeTeam"] == home and row["FTR"] == "H":
+            home_wins += 1
+        elif row["AwayTeam"] == home and row["FTR"] == "A":
+            home_wins += 1
+        else:
+            away_wins += 1
+
+    return f"Thắng {home_wins} - Hòa {draws} - Thua {away_wins}"
+
+
+# [DA XOA] get_home_advantage — da loai bo vi gay thien vi san nha
 
 
 def get_season_gd(df, team, season):
@@ -217,6 +250,75 @@ def get_ppg(df, team, season):
     return round(pts / len(season_games), 4)
 
 
+def get_venue_form(df, team, role="home", n=FORM_N):
+    """
+    Tinh form CHI tren san nha (role='home') hoac CHI tren san khach (role='away').
+    """
+    if role == "home":
+        games = df[df["HomeTeam"] == team].tail(n)
+        if len(games) == 0:
+            return 1.0  # Trung lap (khong gia dinh home tot hon)
+        pts = []
+        for _, row in games.iterrows():
+            pts.append(3 if row["FTR"] == "H" else (1 if row["FTR"] == "D" else 0))
+    else:
+        games = df[df["AwayTeam"] == team].tail(n)
+        if len(games) == 0:
+            return 1.0  # Trung lap (khong gia dinh away yeu hon)
+        pts = []
+        for _, row in games.iterrows():
+            pts.append(3 if row["FTR"] == "A" else (1 if row["FTR"] == "D" else 0))
+
+    return float(np.mean(pts))
+
+
+def get_clean_sheet_rate(df, team, n=FORM_N):
+    """Ti le giu sach luoi trong n tran gan nhat."""
+    games = df[(df["HomeTeam"] == team) | (df["AwayTeam"] == team)].tail(n)
+    if len(games) == 0:
+        return 0.3
+
+    cs = []
+    for _, row in games.iterrows():
+        if row["HomeTeam"] == team:
+            cs.append(1.0 if row["FTAG"] == 0 else 0.0)
+        else:
+            cs.append(1.0 if row["FTHG"] == 0 else 0.0)
+
+    return float(np.mean(cs))
+
+
+def get_streak(df, team, streak_type="win"):
+    """
+    Tinh chuoi thang (streak_type='win') hoac thua ('loss') lien tiep hien tai.
+    """
+    games = df[(df["HomeTeam"] == team) | (df["AwayTeam"] == team)]
+    if len(games) == 0:
+        return 0
+
+    streak = 0
+    for _, row in games.iloc[::-1].iterrows():
+        if row["HomeTeam"] == team:
+            is_win  = row["FTR"] == "H"
+            is_loss = row["FTR"] == "A"
+        else:
+            is_win  = row["FTR"] == "A"
+            is_loss = row["FTR"] == "H"
+
+        if streak_type == "win":
+            if is_win:
+                streak += 1
+            else:
+                break
+        else:  # loss
+            if is_loss:
+                streak += 1
+            else:
+                break
+
+    return streak
+
+
 # ------------------------------------------------------------------------------
 # 3. Ham tong hop: tinh tat ca features cho 1 tran dau
 # ------------------------------------------------------------------------------
@@ -245,11 +347,7 @@ def build_match_features(home, away, match_date, season, df):
     home_sot = get_sot_avg(df_before, home)
     away_sot = get_sot_avg(df_before, away)
 
-    home_adv = get_home_advantage(df_before, home)
-    h2h_wr   = get_h2h_winrate(df_before, home, away)
-
-    home_rest = get_rest_days(df_before, home, match_date)
-    away_rest = get_rest_days(df_before, away, match_date)
+    h2h_dom  = get_h2h_dominance(df_before, home, away)
 
     home_gd  = get_season_gd(df_before, home, season)
     away_gd  = get_season_gd(df_before, away, season)
@@ -257,19 +355,47 @@ def build_match_features(home, away, match_date, season, df):
     home_ppg = get_ppg(df_before, home, season)
     away_ppg = get_ppg(df_before, away, season)
 
+    # Venue form (defaults trung lap 1.0/1.0)
+    home_venue = get_venue_form(df_before, home, role="home")
+    away_venue = get_venue_form(df_before, away, role="away")
+
+    # Clean sheet
+    home_cs = get_clean_sheet_rate(df_before, home)
+    away_cs = get_clean_sheet_rate(df_before, away)
+
+    # Streaks
+    home_ws = get_streak(df_before, home, "win")
+    away_ws = get_streak(df_before, away, "win")
+    home_ls = get_streak(df_before, home, "loss")
+    away_ls = get_streak(df_before, away, "loss")
+
     return {
-        "wform_diff":      home_wform - away_wform,
-        "adj_form_diff":   home_adj   - away_adj,
-        "scored_diff":     home_gf    - away_gf,
-        "conceded_diff":   home_ga    - away_ga,
-        "h2h_home_winrate": h2h_wr,
-        "home_advantage":  home_adv,
-        "elo_diff":        elo_diff,
-        "sot_diff":        home_sot   - away_sot,
-        "rest_diff":       home_rest  - away_rest,
-        "season_gd_diff":  home_gd    - away_gd,
-        "ppg_diff":        home_ppg   - away_ppg,
-        "elo_x_home_adv":  elo_diff   * home_adv,
+        "wform_diff":       home_wform - away_wform,
+        "adj_form_diff":    home_adj   - away_adj,
+        "scored_diff":      home_gf    - away_gf,
+        "conceded_diff":    home_ga    - away_ga,
+        "h2h_dominance":    h2h_dom,
+        "elo_diff":         elo_diff,
+        "sot_diff":         home_sot   - away_sot,
+        "season_gd_diff":   home_gd    - away_gd,
+        "ppg_diff":         home_ppg   - away_ppg,
+        "venue_form_diff":  home_venue - away_venue,
+        "cs_diff":          home_cs    - away_cs,
+        "win_streak_diff":  home_ws    - away_ws,
+        "loss_streak_diff": home_ls    - away_ls,
+        
+        # Raw stats for frontend UI details
+        "home_elo":         round(home_elo, 1),
+        "away_elo":         round(away_elo, 1),
+        "home_form_str":    get_recent_form_string(df_before, home),
+        "away_form_str":    get_recent_form_string(df_before, away),
+        "home_gf":          round(home_gf, 2),
+        "away_gf":          round(away_gf, 2),
+        "home_ga":          round(home_ga, 2),
+        "away_ga":          round(away_ga, 2),
+        "home_cs":          round(home_cs, 2),
+        "away_cs":          round(away_cs, 2),
+        "h2h_str":          get_h2h_stats(df_before, home, away),
     }
 
 
@@ -306,7 +432,24 @@ def predict_gameweek(fixtures, gameweek, season="2025/26"):
 
         # Du doan xac suat
         proba = model.predict_proba(feat_vector)[0]
-        pred  = model.predict(feat_vector)[0]
+
+        # Tinh priors tu lich su truoc ngay dien ra tran dau
+        df_before = df_hist[df_hist["Date"] < match_date]
+        if len(df_before) > 0:
+            y_hist = df_before["label"].values
+            priors = np.array([
+                np.mean(y_hist == 0),
+                np.mean(y_hist == 1),
+                np.mean(y_hist == 2)
+            ])
+            priors = np.clip(priors, 1e-5, 1.0)
+        else:
+            priors = np.array([0.46, 0.27, 0.27])
+
+        # Apply class-adjustment prior correction with exponent alpha = 0.8
+        alpha = 0.8
+        adj_proba = proba / (priors ** alpha)
+        pred = np.argmax(adj_proba)
 
         label_map = {0: "Home Win", 1: "Draw", 2: "Away Win"}
         pred_label = label_map[pred]
@@ -320,6 +463,18 @@ def predict_gameweek(fixtures, gameweek, season="2025/26"):
             "draw%":     round(proba[1] * 100, 1),
             "away_win%": round(proba[2] * 100, 1),
             "prediction": pred_label,
+            # Additional fields for frontend details modal
+            "home_elo":      feats.get("home_elo", 0),
+            "away_elo":      feats.get("away_elo", 0),
+            "home_form_str": feats.get("home_form_str", ""),
+            "away_form_str": feats.get("away_form_str", ""),
+            "home_gf":       feats.get("home_gf", 0),
+            "away_gf":       feats.get("away_gf", 0),
+            "home_ga":       feats.get("home_ga", 0),
+            "away_ga":       feats.get("away_ga", 0),
+            "home_cs":       feats.get("home_cs", 0),
+            "away_cs":       feats.get("away_cs", 0),
+            "h2h_str":       feats.get("h2h_str", ""),
         }
         results.append(result)
 

@@ -1,0 +1,11 @@
+gameweek,home,away,date,home_win%,draw%,away_win%,prediction,home_elo,away_elo,home_form_str,away_form_str,home_gf,away_gf,home_ga,away_ga,home_cs,away_cs,h2h_str
+38,Sunderland,Chelsea,2026-05-24,28.0,23.2,48.9,Away Win,1489.2,1591.4,L L D D W,L L L D W,1.4,0.8,2.2,1.8,0.2,0.0,Thắng 2 - Hòa 0 - Thua 3
+38,Brighton,Manchester United,2026-05-24,36.3,29.3,34.4,Draw,1610.1,1639.2,D W L W L,W W W D W,1.8,1.8,1.2,1.0,0.4,0.4,Thắng 4 - Hòa 0 - Thua 2
+38,Crystal Palace,Arsenal,2026-05-24,17.3,20.5,62.2,Away Win,1549.8,1762.2,L L D L D,L W W W W,1.0,1.4,2.6,0.4,0.0,0.8,Thắng 0 - Hòa 1 - Thua 5
+38,Burnley,Wolverhampton,2026-05-24,40.1,25.5,34.3,Away Win,1384.8,1429.7,L L L D L,L L D L D,0.8,0.4,2.2,1.8,0.0,0.0,Thắng 3 - Hòa 2 - Thua 1
+38,Fulham,Newcastle United,2026-05-24,35.6,29.6,34.8,Draw,1553.9,1576.5,D W L L D,L L W D W,0.4,1.6,1.0,1.2,0.4,0.0,Thắng 2 - Hòa 0 - Thua 4
+38,Liverpool,Brentford,2026-05-24,52.2,28.4,19.4,Home Win,1673.0,1579.5,W W L D L,D L W L D,2.0,1.2,2.0,1.4,0.0,0.4,Thắng 5 - Hòa 0 - Thua 1
+38,Manchester City,Aston Villa,2026-05-24,61.0,28.0,11.0,Home Win,1765.7,1616.8,W D W W D,W L L D W,2.2,2.2,0.8,2.0,0.6,0.0,Thắng 3 - Hòa 0 - Thua 3
+38,Nott'm Forest,Bournemouth,2026-05-24,37.2,29.3,33.5,Draw,1562.5,1620.3,W W W D L,W D W W D,3.0,1.8,1.2,0.8,0.2,0.4,Thắng 0 - Hòa 3 - Thua 3
+38,Tottenham,Everton,2026-05-24,28.5,15.2,56.3,Away Win,1492.0,1574.2,D W W D L,L L D D L,1.4,1.6,1.2,2.4,0.2,0.0,Thắng 3 - Hòa 2 - Thua 1
+38,West Ham,Leeds United,2026-05-24,33.5,32.7,33.8,Draw,1510.2,1526.5,D W L L L,W D W D W,0.6,2.0,1.6,0.8,0.2,0.4,Thắng 3 - Hòa 1 - Thua 2

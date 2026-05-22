@@ -27,7 +27,10 @@ warnings.filterwarnings("ignore")
 
 from sklearn.linear_model import LogisticRegression
 from sklearn.preprocessing import StandardScaler
+from sklearn.base import clone
 from sklearn.metrics import accuracy_score, log_loss, classification_report
+from sklearn.utils.class_weight import compute_sample_weight
+from xgboost import XGBClassifier
 
 CLEAN_PATH    = "data/epl_clean.csv"
 MODEL_PATH    = "models/model_best.pkl"
@@ -43,13 +46,15 @@ FEATURE_COLS = [
     "adj_form_diff",
     "scored_diff",
     "conceded_diff",
-    "h2h_home_winrate",
-    "home_advantage",
+    "h2h_dominance",
     "elo_diff",
     "sot_diff",
-    "rest_diff",
     "season_gd_diff",
     "ppg_diff",
+    "venue_form_diff",
+    "cs_diff",
+    "win_streak_diff",
+    "loss_streak_diff",
 ]
 LABEL_COL   = "label"
 LABEL_MAP   = {0: "Home Win", 1: "Draw", 2: "Away Win"}
@@ -290,31 +295,62 @@ print()
 
 # Load model cu de so sanh
 old_val_acc = None
+old_model = None
+old_scaler = None
+old_model_name = "XGBoost"
 if os.path.exists(MODEL_PATH):
     with open(MODEL_PATH, "rb") as f:
         old_data = pickle.load(f)
     old_model   = old_data["model"]
     old_scaler  = old_data.get("scaler")
     old_version = old_data.get("version", "?")
+    old_model_name = old_data.get("model_name", "XGBoost")
 
     X_val_old = old_scaler.transform(X_val) if old_scaler else X_val
     old_val_acc = accuracy_score(y_val, old_model.predict(X_val_old))
     print(f"Model cu (version {old_version}): Val Acc = {old_val_acc:.4f}")
 
 # Train model moi
-scaler_new = StandardScaler()
-X_train_sc = scaler_new.fit_transform(X_train)
-X_val_sc   = scaler_new.transform(X_val)
+# Default: XGBoost tuned (best config tu experiments)
+# Neu model cu la XGBoost/tree-based, clone no; neu la Ensemble thi dung XGB moi
+DEFAULT_XGB = XGBClassifier(
+    n_estimators=100, max_depth=2, learning_rate=0.07,
+    subsample=0.8, colsample_bytree=0.8, min_child_weight=3,
+    random_state=42, eval_metric="mlogloss", verbosity=0
+)
 
-lr_new = LogisticRegression(max_iter=2000, random_state=42, C=0.1)
-lr_new.fit(X_train_sc, y_train)
+if old_model is not None:
+    # Khong clone VotingClassifier (phuc tap, khong on dinh khi retrain)
+    if hasattr(old_model, 'estimators_') and hasattr(old_model, 'voting'):
+        print("  Model cu la VotingClassifier — chuyen sang XGBoost tuned")
+        new_model = clone(DEFAULT_XGB)
+        model_name_to_save = "XGBoost"
+    else:
+        new_model = clone(old_model)
+        model_name_to_save = old_model_name
+else:
+    new_model = clone(DEFAULT_XGB)
+    model_name_to_save = "XGBoost"
 
-new_pred     = lr_new.predict(X_val_sc)
-new_proba    = lr_new.predict_proba(X_val_sc)
+# XGBoost/tree-based khong can scaler
+needs_scaler = "Logistic" in model_name_to_save
+if needs_scaler:
+    scaler_new = StandardScaler()
+    X_train_in = scaler_new.fit_transform(X_train)
+    X_val_in   = scaler_new.transform(X_val)
+else:
+    scaler_new = None
+    X_train_in = X_train
+    X_val_in   = X_val
+
+new_model.fit(X_train_in, y_train)
+
+new_pred     = new_model.predict(X_val_in)
+new_proba    = new_model.predict_proba(X_val_in)
 new_val_acc  = accuracy_score(y_val, new_pred)
 new_val_loss = log_loss(y_val, new_proba)
 
-print(f"Model moi             : Val Acc = {new_val_acc:.4f}  LogLoss = {new_val_loss:.4f}")
+print(f"Model moi ({model_name_to_save:20s}): Val Acc = {new_val_acc:.4f}  LogLoss = {new_val_loss:.4f}")
 
 if old_val_acc is not None:
     diff = new_val_acc - old_val_acc
@@ -332,10 +368,10 @@ except:
 
 # Luu model
 model_data = {
-    "model":        lr_new,
-    "model_name":   "Logistic Regression",
+    "model":        new_model,
+    "model_name":   model_name_to_save,
     "feature_cols": FEATURE_COLS,
-    "scaler":       scaler_new,
+    "scaler":       scaler_new if needs_scaler else None,
     "val_acc":      round(new_val_acc,  4),
     "val_loss":     round(new_val_loss, 4),
     "train_size":   len(X_train),

@@ -252,45 +252,41 @@ def compute_goal_averages(df: pd.DataFrame, n: int = FORM_WINDOW):
 
 
 # ------------------------------------------------------------------------------
-# 7. Lich su doi dau truc tiep (H2H)
+# 7. Lich su doi dau truc tiep (H2H) — doi xung (khong thien vi san nha)
+#
+# h2h_dominance = (so tran home_team thang - so tran away_team thang) / tong tran
+# Gia tri tu -1.0 (away team thong tri) den +1.0 (home team thong tri)
+# Default: 0.0 (trung lap — khong doi nao co loi the)
 # ------------------------------------------------------------------------------
 
 def compute_h2h(df: pd.DataFrame) -> list:
-    h2h_hist: dict[tuple, list] = {}
-    h2h_winrates = []
+    h2h_hist: dict[tuple, list] = {}  # {sorted_key: [(home_team_of_that_row, result_for_home)]}
+    h2h_dominance = []
 
     for _, row in df.iterrows():
         home, away = row["HomeTeam"], row["AwayTeam"]
         key = tuple(sorted([home, away]))
 
-        past      = h2h_hist.get(key, [])
-        past_home = [r for (h, r) in past if h == home]
-
-        h2h_winrates.append(np.mean(past_home) if past_home else 0.45)
+        past = h2h_hist.get(key, [])
+        if past:
+            # Tinh net dominance cua home team hien tai
+            home_wins = sum(1 for (h, r) in past if (h == home and r == 1.0) or (h != home and r == 0.0))
+            away_wins = sum(1 for (h, r) in past if (h == home and r == 0.0) or (h != home and r == 1.0))
+            h2h_dominance.append((home_wins - away_wins) / len(past))
+        else:
+            h2h_dominance.append(0.0)  # Trung lap — khong thien vi san nha
 
         val = 1.0 if row["FTR"] == "H" else (0.5 if row["FTR"] == "D" else 0.0)
         h2h_hist.setdefault(key, []).append((home, val))
 
-    return h2h_winrates
+    return h2h_dominance
 
 
 # ------------------------------------------------------------------------------
-# 8. Ti le thang san nha tich luy
+# 8. [DA XOA] Ti le thang san nha tich luy
+#    Da loai bo home_advantage vi gay thien vi san nha.
+#    ELO va venue_form da du de capture do manh cua doi.
 # ------------------------------------------------------------------------------
-
-def compute_home_advantage(df: pd.DataFrame) -> list:
-    home_record: dict[str, list] = {}
-    advantages = []
-
-    for _, row in df.iterrows():
-        home = row["HomeTeam"]
-        past = home_record.get(home, [])
-        advantages.append(np.mean(past) if past else 0.45)
-
-        val = 1.0 if row["FTR"] == "H" else (0.5 if row["FTR"] == "D" else 0.0)
-        home_record.setdefault(home, []).append(val)
-
-    return advantages
 
 
 # ------------------------------------------------------------------------------
@@ -432,6 +428,132 @@ def compute_season_points(df: pd.DataFrame):
     return home_ppg, away_ppg
 
 
+# ------------------------------------------------------------------------------
+# 13. [MOI] Form chi tinh o san nha / san khach
+#     VD: doi nha manh o san nha nhung yeu o san khach
+# ------------------------------------------------------------------------------
+
+def compute_venue_form(df: pd.DataFrame, n: int = FORM_WINDOW):
+    """
+    Tinh form CHI tren san nha (cho doi nha) va CHI tren san khach (cho doi khach).
+    Khac voi form thuong (tinh toan bo tran), day chi tinh khi doi da dung vai tro do.
+    Reset moi mua.
+    """
+    home_at_home: dict[str, list] = {}  # lich su diem khi da san nha
+    away_at_away: dict[str, list] = {}  # lich su diem khi da san khach
+    current_season = None
+    home_venue_forms, away_venue_forms = [], []
+
+    for _, row in df.iterrows():
+        season, home, away, result = row["Season"], row["HomeTeam"], row["AwayTeam"], row["FTR"]
+
+        if season != current_season:
+            home_at_home, away_at_away = {}, {}
+            current_season = season
+
+        hh = home_at_home.get(home, [])
+        aa = away_at_away.get(away, [])
+
+        home_venue_forms.append(np.mean(hh[-n:]) if hh else 1.0)  # Trung lap (khong gia dinh home tot hon)
+        away_venue_forms.append(np.mean(aa[-n:]) if aa else 1.0)  # Trung lap (khong gia dinh away yeu hon)
+
+        # Cap nhat
+        if result == "H":
+            home_at_home.setdefault(home, []).append(3)
+            away_at_away.setdefault(away, []).append(0)
+        elif result == "D":
+            home_at_home.setdefault(home, []).append(1)
+            away_at_away.setdefault(away, []).append(1)
+        else:
+            home_at_home.setdefault(home, []).append(0)
+            away_at_away.setdefault(away, []).append(3)
+
+    return home_venue_forms, away_venue_forms
+
+
+# ------------------------------------------------------------------------------
+# 14. [MOI] Clean sheet rate (ti le giu sach luoi)
+# ------------------------------------------------------------------------------
+
+def compute_clean_sheet(df: pd.DataFrame, n: int = FORM_WINDOW):
+    """
+    Ti le giu sach luoi (khong bi ban thang) trong n tran gan nhat.
+    Clean sheet cao = hang phong ngu tot.
+    Reset moi mua.
+    """
+    cs_hist: dict[str, list] = {}
+    current_season = None
+    home_cs, away_cs = [], []
+
+    for _, row in df.iterrows():
+        season, home, away = row["Season"], row["HomeTeam"], row["AwayTeam"]
+        hg, ag = row["FTHG"], row["FTAG"]
+
+        if season != current_season:
+            cs_hist = {}
+            current_season = season
+
+        h_hist = cs_hist.get(home, [])
+        a_hist = cs_hist.get(away, [])
+
+        home_cs.append(np.mean(h_hist[-n:]) if h_hist else 0.3)
+        away_cs.append(np.mean(a_hist[-n:]) if a_hist else 0.3)
+
+        # 1 = clean sheet, 0 = bi ban thang
+        cs_hist.setdefault(home, []).append(1.0 if ag == 0 else 0.0)
+        cs_hist.setdefault(away, []).append(1.0 if hg == 0 else 0.0)
+
+    return home_cs, away_cs
+
+
+# ------------------------------------------------------------------------------
+# 15. [MOI] Win streak / Loss streak (chuoi thang/thua lien tiep)
+# ------------------------------------------------------------------------------
+
+def compute_streaks(df: pd.DataFrame):
+    """
+    Tinh chuoi thang lien tiep va chuoi thua lien tiep hien tai.
+    VD: Chelsea thua 5 tran lien tiep -> loss_streak = 5
+    Reset moi mua.
+    """
+    win_streak:  dict[str, int] = {}
+    loss_streak: dict[str, int] = {}
+    current_season = None
+    home_ws, away_ws = [], []
+    home_ls, away_ls = [], []
+
+    for _, row in df.iterrows():
+        season, home, away, result = row["Season"], row["HomeTeam"], row["AwayTeam"], row["FTR"]
+
+        if season != current_season:
+            win_streak, loss_streak = {}, {}
+            current_season = season
+
+        home_ws.append(win_streak.get(home, 0))
+        away_ws.append(win_streak.get(away, 0))
+        home_ls.append(loss_streak.get(home, 0))
+        away_ls.append(loss_streak.get(away, 0))
+
+        # Cap nhat streaks
+        if result == "H":
+            win_streak[home]  = win_streak.get(home, 0) + 1
+            loss_streak[home] = 0
+            win_streak[away]  = 0
+            loss_streak[away] = loss_streak.get(away, 0) + 1
+        elif result == "A":
+            win_streak[away]  = win_streak.get(away, 0) + 1
+            loss_streak[away] = 0
+            win_streak[home]  = 0
+            loss_streak[home] = loss_streak.get(home, 0) + 1
+        else:  # Draw
+            win_streak[home]  = 0
+            win_streak[away]  = 0
+            loss_streak[home] = 0
+            loss_streak[away] = 0
+
+    return home_ws, away_ws, home_ls, away_ls
+
+
 # ==============================================================================
 # GAN FEATURES VAO DATAFRAME
 # ==============================================================================
@@ -456,9 +578,8 @@ df["adj_form_diff"] = df["home_adj_form"] - df["away_adj_form"]
 df["scored_diff"]   = df["home_scored_avg"] - df["away_scored_avg"]
 df["conceded_diff"] = df["home_conceded_avg"] - df["away_conceded_avg"]
 
-# H2H va home advantage
-df["h2h_home_winrate"] = compute_h2h(df)
-df["home_advantage"]   = compute_home_advantage(df)
+# H2H — doi xung (khong con thien vi san nha)
+df["h2h_dominance"] = compute_h2h(df)
 
 # ELO
 df["home_elo"], df["away_elo"] = compute_elo(df)
@@ -480,8 +601,19 @@ df["season_gd_diff"] = df["home_season_gd"] - df["away_season_gd"]
 df["home_ppg"], df["away_ppg"] = compute_season_points(df)
 df["ppg_diff"] = df["home_ppg"] - df["away_ppg"]
 
-# Feature tuong tac
-df["elo_x_home_adv"] = df["elo_diff"] * df["home_advantage"]
+# [MOI] Form san nha/khach rieng
+df["home_venue_form"], df["away_venue_form"] = compute_venue_form(df)
+df["venue_form_diff"] = df["home_venue_form"] - df["away_venue_form"]
+
+# [MOI] Clean sheet rate
+df["home_cs_rate"], df["away_cs_rate"] = compute_clean_sheet(df)
+df["cs_diff"] = df["home_cs_rate"] - df["away_cs_rate"]
+
+# [MOI] Win/Loss streaks
+(df["home_win_streak"], df["away_win_streak"],
+ df["home_loss_streak"], df["away_loss_streak"]) = compute_streaks(df)
+df["win_streak_diff"]  = df["home_win_streak"]  - df["away_win_streak"]
+df["loss_streak_diff"] = df["home_loss_streak"] - df["away_loss_streak"]
 
 # Label encode
 LABEL_MAP = {"H": 0, "D": 1, "A": 2}
@@ -499,27 +631,32 @@ FINAL_COLS = [
     "FTHG", "FTAG", "FTR", "label",
     # Form don gian (giu de tham khao)
     "home_form", "away_form", "form_diff",
-    # [MOI] Weighted form
+    # Weighted form
     "home_wform", "away_wform", "wform_diff",
-    # [MOI] Adjusted form (co tinh do kho doi thu)
+    # Adjusted form (co tinh do kho doi thu)
     "home_adj_form", "away_adj_form", "adj_form_diff",
     # Ban thang/thua
     "home_scored_avg", "home_conceded_avg",
     "away_scored_avg", "away_conceded_avg",
     "scored_diff", "conceded_diff",
-    # H2H va home advantage
-    "h2h_home_winrate", "home_advantage",
+    # H2H — doi xung (da sua de khong thien vi san nha)
+    "h2h_dominance",
     # ELO
     "home_elo", "away_elo", "elo_diff",
-    # Shots on target (bo shots tong so)
+    # Shots on target
     "home_sot_avg", "away_sot_avg", "sot_diff",
     # Rest days
     "home_rest", "away_rest", "rest_diff",
     # Season stats
     "home_season_gd", "away_season_gd", "season_gd_diff",
     "home_ppg", "away_ppg", "ppg_diff",
-    # Feature tuong tac
-    "elo_x_home_adv",
+    # Form san nha/khach rieng (defaults trung lap 1.0/1.0)
+    "home_venue_form", "away_venue_form", "venue_form_diff",
+    # Clean sheet rate
+    "home_cs_rate", "away_cs_rate", "cs_diff",
+    # Win/Loss streaks
+    "home_win_streak", "away_win_streak", "win_streak_diff",
+    "home_loss_streak", "away_loss_streak", "loss_streak_diff",
 ]
 
 df_clean = df[FINAL_COLS].copy()

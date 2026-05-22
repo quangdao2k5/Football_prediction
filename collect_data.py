@@ -54,8 +54,17 @@ def download_season(season: str) -> pd.DataFrame | None:
     label = f"20{season[:2]}/{season[2:]}"  # vd: "2015/16"
 
     try:
-        response = requests.get(url, timeout=15)
-        response.raise_for_status()
+        headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"}
+        
+        for attempt in range(3):
+            try:
+                response = requests.get(url, headers=headers, timeout=30)
+                response.raise_for_status()
+                break
+            except Exception as e:
+                if attempt == 2:
+                    raise e
+                time.sleep(2)
 
         # Đọc CSV từ content trả về
         from io import StringIO
@@ -70,6 +79,10 @@ def download_season(season: str) -> pd.DataFrame | None:
 
         # Bỏ hàng không có kết quả (cuối file hay có hàng trống)
         df = df.dropna(subset=["FTR", "HomeTeam", "AwayTeam"])
+
+        # Parse date ngay cho tung mua (tranh loi khi gop mixed format)
+        # football-data.co.uk dung dd/mm/yyyy hoac dd/mm/yy tuy mua
+        df["Date"] = pd.to_datetime(df["Date"], format="mixed", dayfirst=True, errors="coerce")
 
         print(f"  [OK] {label}: {len(df)} tran")
         return df
@@ -110,11 +123,8 @@ def main():
         print("\n[ERROR] Khong download duoc du lieu nao!")
         return
 
-    # Gop tat ca mua
+    # Gop tat ca mua (date da duoc parse truoc cho tung mua)
     df_all = pd.concat(all_seasons, ignore_index=True)
-
-    # Parse ngay thang
-    df_all["Date"] = pd.to_datetime(df_all["Date"], format="%Y-%m-%d", errors="coerce")
 
     # Sap xep theo thoi gian
     df_all = df_all.sort_values("Date").reset_index(drop=True)
