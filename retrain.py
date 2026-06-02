@@ -55,6 +55,14 @@ FEATURE_COLS = [
     "cs_diff",
     "win_streak_diff",
     "loss_streak_diff",
+    # Late-season & motivation features
+    "season_progress",
+    "gap_top_diff",
+    "gap_rel_diff",
+    "motivation_diff",
+    "low_motivation",
+    "draw_rate_avg",
+    "momentum_diff",
 ]
 LABEL_COL   = "label"
 LABEL_MAP   = {0: "Home Win", 1: "Draw", 2: "Away Win"}
@@ -293,6 +301,24 @@ print(f"Train: {len(X_train)} tran (den mua {sorted(train_seasons)[-1]})")
 print(f"Val  : {len(X_val)} tran (2024/25 - kiem tra regression)")
 print()
 
+# Season recency weighting + class balance
+SEASON_DECAY = 0.85
+from sklearn.utils.class_weight import compute_sample_weight
+
+def compute_combined_weights_retrain(df_subset, y_subset, decay=SEASON_DECAY):
+    seasons = sorted(df_subset["Season"].unique())
+    n = len(seasons)
+    season_w_map = {}
+    for i, s in enumerate(seasons):
+        season_w_map[s] = decay ** (n - 1 - i)
+    season_w = df_subset["Season"].map(season_w_map).values
+    class_w  = compute_sample_weight("balanced", y_subset)
+    combined = season_w * class_w
+    combined = combined / combined.mean()
+    return combined
+
+sample_weights_train = compute_combined_weights_retrain(df_train, y_train)
+
 # Load model cu de so sanh
 old_val_acc = None
 old_model = None
@@ -316,7 +342,7 @@ if os.path.exists(MODEL_PATH):
 DEFAULT_XGB = XGBClassifier(
     n_estimators=100, max_depth=2, learning_rate=0.07,
     subsample=0.8, colsample_bytree=0.8, min_child_weight=3,
-    random_state=42, eval_metric="mlogloss", verbosity=0
+    random_state=42, n_jobs=1, eval_metric="mlogloss", verbosity=0
 )
 
 if old_model is not None:
@@ -375,6 +401,7 @@ model_data = {
     "val_acc":      round(new_val_acc,  4),
     "val_loss":     round(new_val_loss, 4),
     "train_size":   len(X_train),
+    "draw_boost":   old_data.get("draw_boost", 0.0) if old_data else 0.0,
     "version":      new_ver,
     "retrained_on": str(df["Date"].max().date()),
 }

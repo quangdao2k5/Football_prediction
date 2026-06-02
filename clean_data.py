@@ -290,15 +290,27 @@ def compute_h2h(df: pd.DataFrame) -> list:
 
 
 # ------------------------------------------------------------------------------
-# 9. ELO rating (tich luy qua tat ca mua)
+# 9. ELO rating (tich luy qua tat ca mua, regression to mean giua cac mua)
 # ------------------------------------------------------------------------------
+
+ELO_REGRESS = 0.7   # Dau mua moi: elo = 0.7 * elo_cuoi_mua_truoc + 0.3 * default
 
 def compute_elo(df: pd.DataFrame, k: float = ELO_K, default: float = ELO_DEFAULT):
     elo: dict[str, float] = {}
+    current_season = None
     home_elos, away_elos = [], []
 
     for _, row in df.iterrows():
+        season = row["Season"]
         home, away = row["HomeTeam"], row["AwayTeam"]
+
+        # Regression to mean dau moi mua
+        if season != current_season:
+            if current_season is not None:  # Khong regress mua dau tien
+                for team in list(elo.keys()):
+                    elo[team] = ELO_REGRESS * elo[team] + (1 - ELO_REGRESS) * default
+            current_season = season
+
         h_elo = elo.get(home, default)
         a_elo = elo.get(away, default)
 
@@ -554,6 +566,403 @@ def compute_streaks(df: pd.DataFrame):
     return home_ws, away_ws, home_ls, away_ls
 
 
+# ------------------------------------------------------------------------------
+# 16. [MOI] Season progress — vong dau hien tai / 38
+# ------------------------------------------------------------------------------
+
+def compute_season_progress(df: pd.DataFrame):
+    """
+    Tinh tien trinh mua giai cho moi tran dau.
+    season_progress = so tran doi nha da da trong mua / 38
+    Gia tri tu 0.0 (dau mua) den ~1.0 (cuoi mua).
+    """
+    match_count: dict[str, int] = {}  # {team: so tran da da trong mua}
+    current_season = None
+    home_progress, away_progress = [], []
+
+    for _, row in df.iterrows():
+        season, home, away = row["Season"], row["HomeTeam"], row["AwayTeam"]
+
+        if season != current_season:
+            match_count = {}
+            current_season = season
+
+        h_count = match_count.get(home, 0)
+        a_count = match_count.get(away, 0)
+
+        home_progress.append(h_count / 38.0)
+        away_progress.append(a_count / 38.0)
+
+        match_count[home] = h_count + 1
+        match_count[away] = a_count + 1
+
+    return home_progress, away_progress
+
+
+# ------------------------------------------------------------------------------
+# 17. [MOI] Standings context — khoang cach diem den dinh/day bang
+#     Va motivation proxy
+# ------------------------------------------------------------------------------
+
+def compute_standings_context(df: pd.DataFrame):
+    """
+    Tinh:
+    - pts_gap_to_leader: khoang cach diem den doi dung dau (luon <= 0)
+    - pts_gap_to_relegation: khoang cach diem den vi tri xuong hang (thu 18)
+      Duong = an toan, am = dang trong vung nguy hiem
+    - motivation: 0 = thieu dong luc (da an toan va khong canh tranh gi),
+                  1 = co dong luc (dang canh tranh dinh/day)
+    Reset moi mua.
+    """
+    pts: dict[str, int] = {}
+    mp:  dict[str, int] = {}
+    current_season = None
+
+    home_gap_top, away_gap_top = [], []
+    home_gap_rel, away_gap_rel = [], []
+    home_motivation, away_motivation = [], []
+
+    for _, row in df.iterrows():
+        season, home, away = row["Season"], row["HomeTeam"], row["AwayTeam"]
+
+        if season != current_season:
+            pts, mp = {}, {}
+            current_season = season
+
+        h_pts = pts.get(home, 0)
+        a_pts = pts.get(away, 0)
+        h_mp  = mp.get(home, 0)
+        a_mp  = mp.get(away, 0)
+
+        # Tinh standings hien tai
+        all_pts = sorted(pts.values(), reverse=True) if pts else [0]
+        leader_pts = all_pts[0] if all_pts else 0
+        # Vi tri xuong hang: thu 18 (index 17) hoac cuoi cung neu chua du 20 doi
+        rel_idx = min(17, len(all_pts) - 1)
+        rel_pts = all_pts[rel_idx] if all_pts else 0
+
+        # Gap to leader (luon <= 0)
+        home_gap_top.append(h_pts - leader_pts)
+        away_gap_top.append(a_pts - leader_pts)
+
+        # Gap to relegation (duong = an toan)
+        home_gap_rel.append(h_pts - rel_pts)
+        away_gap_rel.append(a_pts - rel_pts)
+
+        # Motivation: 1.0 neu dang canh tranh (top 6 hoac bot 5), else giam dan
+        remaining_h = max(1, 38 - h_mp)
+        remaining_a = max(1, 38 - a_mp)
+        max_possible_h = h_pts + remaining_h * 3
+        max_possible_a = a_pts + remaining_a * 3
+
+        # Doi mat dong luc neu: khong the len top 4 VA da an toan khoi xuong hang
+        h_can_top = max_possible_h >= leader_pts  # con kha nang vo dich
+        h_safe    = h_pts - rel_pts > remaining_h * 1.5  # khoang cach lon
+        a_can_top = max_possible_a >= leader_pts
+        a_safe    = a_pts - rel_pts > remaining_a * 1.5
+
+        h_motiv = 1.0 if (h_can_top or not h_safe) else 0.5
+        a_motiv = 1.0 if (a_can_top or not a_safe) else 0.5
+
+        home_motivation.append(h_motiv)
+        away_motivation.append(a_motiv)
+
+        # Cap nhat diem
+        if row["FTR"] == "H":
+            pts[home] = h_pts + 3
+        elif row["FTR"] == "D":
+            pts[home] = h_pts + 1
+            pts[away] = a_pts + 1
+        else:
+            pts[away] = a_pts + 3
+
+        mp[home] = h_mp + 1
+        mp[away] = a_mp + 1
+
+    return (home_gap_top, away_gap_top,
+            home_gap_rel, away_gap_rel,
+            home_motivation, away_motivation)
+
+
+# ------------------------------------------------------------------------------
+# 18. [MOI v3] Race context — title / Europe / relegation pressure
+# ------------------------------------------------------------------------------
+
+def _clip01(value: float) -> float:
+    return float(max(0.0, min(1.0, value)))
+
+
+def _race_pressure_from_gap(gap: float, window: float = 9.0) -> float:
+    """Cao khi doi nam gan moc canh tranh diem, thap khi da qua xa."""
+    return _clip01(1.0 - abs(gap) / window)
+
+
+def compute_race_context(df: pd.DataFrame):
+    """
+    Tao feature ve muc do canh tranh truoc tran:
+    - position/points hien tai
+    - khoang cach den top 4/top 6
+    - title/top4/europe/relegation pressure
+    - importance va dead-rubber proxy
+
+    Tat ca duoc tinh tu bang xep hang truoc tran, khong dung ket qua tran hien tai.
+    """
+    season_teams = {
+        season: sorted(set(group["HomeTeam"]).union(group["AwayTeam"]))
+        for season, group in df.groupby("Season")
+    }
+
+    stats = {}
+    current_season = None
+
+    home_points, away_points = [], []
+    home_position, away_position = [], []
+    home_gap_top4, away_gap_top4 = [], []
+    home_gap_europe, away_gap_europe = [], []
+    home_title_pressure, away_title_pressure = [], []
+    home_top4_pressure, away_top4_pressure = [], []
+    home_europe_pressure, away_europe_pressure = [], []
+    home_relegation_pressure, away_relegation_pressure = [], []
+    home_importance, away_importance = [], []
+    home_dead_rubber, away_dead_rubber = [], []
+
+    def init_stats(season):
+        return {
+            team: {"pts": 0, "mp": 0, "gf": 0, "ga": 0}
+            for team in season_teams[season]
+        }
+
+    def table_rows():
+        return sorted(
+            stats,
+            key=lambda t: (
+                -stats[t]["pts"],
+                -(stats[t]["gf"] - stats[t]["ga"]),
+                -stats[t]["gf"],
+                t,
+            ),
+        )
+
+    def team_context(team):
+        table = table_rows()
+        n_teams = len(table)
+        pos_map = {team_name: idx + 1 for idx, team_name in enumerate(table)}
+        pos = pos_map[team]
+
+        pts = stats[team]["pts"]
+        mp = stats[team]["mp"]
+        remaining = max(0, 38 - mp)
+        progress = mp / 38.0
+        late_weight = _clip01((progress - 0.55) / 0.35)
+
+        leader_pts = stats[table[0]]["pts"]
+        top4_pts = stats[table[min(3, n_teams - 1)]]["pts"]
+        europe_pts = stats[table[min(5, n_teams - 1)]]["pts"]
+        rel_pts = stats[table[min(17, n_teams - 1)]]["pts"]
+
+        gap_leader = pts - leader_pts
+        gap_top4 = pts - top4_pts
+        gap_europe = pts - europe_pts
+        gap_relegation = pts - rel_pts
+
+        title_alive = pos <= 4 and (pts + remaining * 3 >= leader_pts) and gap_leader >= -9
+        title_pressure = late_weight * (_race_pressure_from_gap(gap_leader, 9.0) if title_alive else 0.0)
+
+        top4_alive = pts + remaining * 3 >= top4_pts
+        top4_pressure = late_weight * (_race_pressure_from_gap(gap_top4, 9.0) if top4_alive else 0.0)
+
+        europe_alive = pts + remaining * 3 >= europe_pts
+        europe_pressure = late_weight * (_race_pressure_from_gap(gap_europe, 9.0) if europe_alive else 0.0)
+
+        if pos >= 18:
+            relegation_pressure = late_weight
+        elif pos >= 15 or gap_relegation <= 9:
+            relegation_pressure = late_weight * _clip01(1.0 - max(gap_relegation, 0) / 9.0)
+        else:
+            relegation_pressure = 0.0
+
+        race_importance = max(
+            title_pressure,
+            top4_pressure,
+            europe_pressure,
+            relegation_pressure,
+        )
+        baseline_importance = 0.35 * (1.0 - late_weight) + 0.10 * late_weight
+        importance = max(baseline_importance, race_importance)
+        dead_rubber = late_weight if importance <= 0.25 else 0.0
+
+        return {
+            "points": pts,
+            "position": pos,
+            "gap_top4": gap_top4,
+            "gap_europe": gap_europe,
+            "title_pressure": title_pressure,
+            "top4_pressure": top4_pressure,
+            "europe_pressure": europe_pressure,
+            "relegation_pressure": relegation_pressure,
+            "importance": importance,
+            "dead_rubber": dead_rubber,
+        }
+
+    for _, row in df.iterrows():
+        season, home, away = row["Season"], row["HomeTeam"], row["AwayTeam"]
+
+        if season != current_season:
+            stats = init_stats(season)
+            current_season = season
+
+        h_ctx = team_context(home)
+        a_ctx = team_context(away)
+
+        home_points.append(h_ctx["points"])
+        away_points.append(a_ctx["points"])
+        home_position.append(h_ctx["position"])
+        away_position.append(a_ctx["position"])
+        home_gap_top4.append(h_ctx["gap_top4"])
+        away_gap_top4.append(a_ctx["gap_top4"])
+        home_gap_europe.append(h_ctx["gap_europe"])
+        away_gap_europe.append(a_ctx["gap_europe"])
+        home_title_pressure.append(h_ctx["title_pressure"])
+        away_title_pressure.append(a_ctx["title_pressure"])
+        home_top4_pressure.append(h_ctx["top4_pressure"])
+        away_top4_pressure.append(a_ctx["top4_pressure"])
+        home_europe_pressure.append(h_ctx["europe_pressure"])
+        away_europe_pressure.append(a_ctx["europe_pressure"])
+        home_relegation_pressure.append(h_ctx["relegation_pressure"])
+        away_relegation_pressure.append(a_ctx["relegation_pressure"])
+        home_importance.append(h_ctx["importance"])
+        away_importance.append(a_ctx["importance"])
+        home_dead_rubber.append(h_ctx["dead_rubber"])
+        away_dead_rubber.append(a_ctx["dead_rubber"])
+
+        hg, ag = int(row["FTHG"]), int(row["FTAG"])
+        if row["FTR"] == "H":
+            stats[home]["pts"] += 3
+        elif row["FTR"] == "D":
+            stats[home]["pts"] += 1
+            stats[away]["pts"] += 1
+        else:
+            stats[away]["pts"] += 3
+
+        stats[home]["mp"] += 1
+        stats[away]["mp"] += 1
+        stats[home]["gf"] += hg
+        stats[home]["ga"] += ag
+        stats[away]["gf"] += ag
+        stats[away]["ga"] += hg
+
+    return {
+        "home_points": home_points,
+        "away_points": away_points,
+        "home_position": home_position,
+        "away_position": away_position,
+        "home_gap_top4": home_gap_top4,
+        "away_gap_top4": away_gap_top4,
+        "home_gap_europe": home_gap_europe,
+        "away_gap_europe": away_gap_europe,
+        "home_title_pressure": home_title_pressure,
+        "away_title_pressure": away_title_pressure,
+        "home_top4_pressure": home_top4_pressure,
+        "away_top4_pressure": away_top4_pressure,
+        "home_europe_pressure": home_europe_pressure,
+        "away_europe_pressure": away_europe_pressure,
+        "home_relegation_pressure": home_relegation_pressure,
+        "away_relegation_pressure": away_relegation_pressure,
+        "home_importance": home_importance,
+        "away_importance": away_importance,
+        "home_dead_rubber": home_dead_rubber,
+        "away_dead_rubber": away_dead_rubber,
+    }
+
+
+# ------------------------------------------------------------------------------
+# 19. [MOI] Draw rate gan day (ti le hoa trong n tran gan nhat)
+# ------------------------------------------------------------------------------
+
+def compute_draw_rate(df: pd.DataFrame, n: int = FORM_WINDOW):
+    """
+    Ti le tran hoa trong n tran gan nhat cua moi doi.
+    Doi hay hoa gan day -> co xu huong tiep tuc hoa.
+    Reset moi mua.
+    """
+    draw_hist: dict[str, list] = {}  # {team: [1 if draw else 0]}
+    current_season = None
+    home_dr, away_dr = [], []
+
+    for _, row in df.iterrows():
+        season, home, away, result = row["Season"], row["HomeTeam"], row["AwayTeam"], row["FTR"]
+
+        if season != current_season:
+            draw_hist = {}
+            current_season = season
+
+        h_hist = draw_hist.get(home, [])
+        a_hist = draw_hist.get(away, [])
+
+        home_dr.append(np.mean(h_hist[-n:]) if h_hist else 0.25)
+        away_dr.append(np.mean(a_hist[-n:]) if a_hist else 0.25)
+
+        is_draw = 1.0 if result == "D" else 0.0
+        draw_hist.setdefault(home, []).append(is_draw)
+        draw_hist.setdefault(away, []).append(is_draw)
+
+    return home_dr, away_dr
+
+
+# ------------------------------------------------------------------------------
+# 19. [MOI] Form momentum — form dang tang hay giam
+#     form_momentum = weighted_form_5 - simple_form_10
+#     Duong = dang len phong do, am = dang xuong
+# ------------------------------------------------------------------------------
+
+def compute_form_momentum(df: pd.DataFrame, n_short: int = 3, n_long: int = 8):
+    """
+    Tinh momentum phong do: form ngan han (3 tran) - form dai han (8 tran).
+    Duong = doi dang tien bo, am = doi dang tut.
+    Reset moi mua.
+    """
+    history: dict[str, list] = {}
+    current_season = None
+    home_mom, away_mom = [], []
+
+    for _, row in df.iterrows():
+        season, home, away, result = row["Season"], row["HomeTeam"], row["AwayTeam"], row["FTR"]
+
+        if season != current_season:
+            history = {}
+            current_season = season
+
+        h_hist = history.get(home, [])
+        a_hist = history.get(away, [])
+
+        if len(h_hist) >= n_short:
+            short_h = np.mean(h_hist[-n_short:])
+            long_h  = np.mean(h_hist[-n_long:]) if len(h_hist) >= n_long else np.mean(h_hist)
+            home_mom.append(short_h - long_h)
+        else:
+            home_mom.append(0.0)
+
+        if len(a_hist) >= n_short:
+            short_a = np.mean(a_hist[-n_short:])
+            long_a  = np.mean(a_hist[-n_long:]) if len(a_hist) >= n_long else np.mean(a_hist)
+            away_mom.append(short_a - long_a)
+        else:
+            away_mom.append(0.0)
+
+        # Cap nhat lich su diem
+        if result == "H":
+            history.setdefault(home, []).append(3)
+            history.setdefault(away, []).append(0)
+        elif result == "D":
+            history.setdefault(home, []).append(1)
+            history.setdefault(away, []).append(1)
+        else:
+            history.setdefault(home, []).append(0)
+            history.setdefault(away, []).append(3)
+
+    return home_mom, away_mom
+
+
 # ==============================================================================
 # GAN FEATURES VAO DATAFRAME
 # ==============================================================================
@@ -581,7 +990,7 @@ df["conceded_diff"] = df["home_conceded_avg"] - df["away_conceded_avg"]
 # H2H — doi xung (khong con thien vi san nha)
 df["h2h_dominance"] = compute_h2h(df)
 
-# ELO
+# ELO (voi regression to mean giua cac mua)
 df["home_elo"], df["away_elo"] = compute_elo(df)
 df["elo_diff"] = df["home_elo"] - df["away_elo"]
 
@@ -615,6 +1024,48 @@ df["cs_diff"] = df["home_cs_rate"] - df["away_cs_rate"]
 df["win_streak_diff"]  = df["home_win_streak"]  - df["away_win_streak"]
 df["loss_streak_diff"] = df["home_loss_streak"] - df["away_loss_streak"]
 
+# [MOI v2] Season progress
+df["home_progress"], df["away_progress"] = compute_season_progress(df)
+df["season_progress"] = (df["home_progress"] + df["away_progress"]) / 2
+
+# [MOI v2] Standings context & motivation
+(df["home_gap_top"], df["away_gap_top"],
+ df["home_gap_rel"], df["away_gap_rel"],
+ df["home_motivation"], df["away_motivation"]) = compute_standings_context(df)
+df["gap_top_diff"] = df["home_gap_top"] - df["away_gap_top"]
+df["gap_rel_diff"] = df["home_gap_rel"] - df["away_gap_rel"]
+df["motivation_diff"] = df["home_motivation"] - df["away_motivation"]
+# Khi ca 2 doi deu thieu dong luc -> xac suat Draw tang
+df["low_motivation"] = ((df["home_motivation"] + df["away_motivation"]) / 2)
+
+# [MOI v3] Race context: title / Europe / relegation / dead rubber
+race_context = compute_race_context(df)
+for col, values in race_context.items():
+    df[col] = values
+
+df["points_diff"] = df["home_points"] - df["away_points"]
+# Duong = doi nha dang xep hang cao hon (vi tri nho hon)
+df["position_diff"] = df["away_position"] - df["home_position"]
+df["gap_top4_diff"] = df["home_gap_top4"] - df["away_gap_top4"]
+df["gap_europe_diff"] = df["home_gap_europe"] - df["away_gap_europe"]
+df["title_pressure_diff"] = df["home_title_pressure"] - df["away_title_pressure"]
+df["top4_pressure_diff"] = df["home_top4_pressure"] - df["away_top4_pressure"]
+df["europe_pressure_diff"] = df["home_europe_pressure"] - df["away_europe_pressure"]
+df["relegation_pressure_diff"] = df["home_relegation_pressure"] - df["away_relegation_pressure"]
+df["importance_diff"] = df["home_importance"] - df["away_importance"]
+df["importance_avg"] = (df["home_importance"] + df["away_importance"]) / 2
+df["dead_rubber_avg"] = (df["home_dead_rubber"] + df["away_dead_rubber"]) / 2
+df["late_importance_diff"] = df["season_progress"] * df["importance_diff"]
+df["late_dead_rubber"] = df["season_progress"] * df["dead_rubber_avg"]
+
+# [MOI v2] Draw rate gan day
+df["home_draw_rate"], df["away_draw_rate"] = compute_draw_rate(df)
+df["draw_rate_avg"] = (df["home_draw_rate"] + df["away_draw_rate"]) / 2
+
+# [MOI v2] Form momentum
+df["home_momentum"], df["away_momentum"] = compute_form_momentum(df)
+df["momentum_diff"] = df["home_momentum"] - df["away_momentum"]
+
 # Label encode
 LABEL_MAP = {"H": 0, "D": 1, "A": 2}
 df["label"] = df["FTR"].map(LABEL_MAP)
@@ -641,7 +1092,7 @@ FINAL_COLS = [
     "scored_diff", "conceded_diff",
     # H2H — doi xung (da sua de khong thien vi san nha)
     "h2h_dominance",
-    # ELO
+    # ELO (voi regression to mean)
     "home_elo", "away_elo", "elo_diff",
     # Shots on target
     "home_sot_avg", "away_sot_avg", "sot_diff",
@@ -657,6 +1108,28 @@ FINAL_COLS = [
     # Win/Loss streaks
     "home_win_streak", "away_win_streak", "win_streak_diff",
     "home_loss_streak", "away_loss_streak", "loss_streak_diff",
+    # [MOI v2] Season progress & late-season features
+    "home_progress", "away_progress", "season_progress",
+    # Standings context
+    "home_gap_top", "away_gap_top", "gap_top_diff",
+    "home_gap_rel", "away_gap_rel", "gap_rel_diff",
+    "home_motivation", "away_motivation", "motivation_diff", "low_motivation",
+    # Race context / standings pressure
+    "home_points", "away_points", "points_diff",
+    "home_position", "away_position", "position_diff",
+    "home_gap_top4", "away_gap_top4", "gap_top4_diff",
+    "home_gap_europe", "away_gap_europe", "gap_europe_diff",
+    "home_title_pressure", "away_title_pressure", "title_pressure_diff",
+    "home_top4_pressure", "away_top4_pressure", "top4_pressure_diff",
+    "home_europe_pressure", "away_europe_pressure", "europe_pressure_diff",
+    "home_relegation_pressure", "away_relegation_pressure", "relegation_pressure_diff",
+    "home_importance", "away_importance", "importance_diff", "importance_avg",
+    "home_dead_rubber", "away_dead_rubber", "dead_rubber_avg",
+    "late_importance_diff", "late_dead_rubber",
+    # Draw rate
+    "home_draw_rate", "away_draw_rate", "draw_rate_avg",
+    # Form momentum
+    "home_momentum", "away_momentum", "momentum_diff",
 ]
 
 df_clean = df[FINAL_COLS].copy()

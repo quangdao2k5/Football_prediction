@@ -1,7 +1,8 @@
 model,val_acc
-XGBoost,0.5711
-Voting Ensemble,0.5675
-Random Forest,0.5632
-Logistic Regression,0.5614
-Gradient Boosting,0.5588
-LightGBM,0.5588
+Robust Logistic Regression,0.5588
+Logistic Regression,0.5561
+XGBoost,0.5553
+Random Forest,0.5544
+Voting Ensemble,0.5544
+Gradient Boosting,0.5509
+LightGBM,0.5474

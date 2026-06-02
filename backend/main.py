@@ -9,6 +9,7 @@ Cai thu vien:
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 import pandas as pd
 import numpy as np
 import pickle
@@ -20,7 +21,14 @@ app = FastAPI(title="EPL Predictor API")
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173", "http://localhost:5174", "http://localhost:3000"],
+    allow_origins=[
+        "http://localhost:5173",
+        "http://localhost:5174",
+        "http://localhost:3000",
+        "http://127.0.0.1:5173",
+        "http://127.0.0.1:5174",
+        "http://127.0.0.1:3000",
+    ],
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -31,6 +39,11 @@ MODEL_PATH   = os.path.join(BASE_DIR, "models", "model_best.pkl")
 CLEAN_PATH   = os.path.join(BASE_DIR, "data",   "epl_clean.csv")
 PRED_DIR     = os.path.join(BASE_DIR, "predictions")
 ACC_LOG      = os.path.join(PRED_DIR, "accuracy_log.csv")
+ACC_COMPARE  = os.path.join(PRED_DIR, "accuracy_comparison.csv")
+REPORT_DIR   = os.path.join(BASE_DIR, "reports")
+
+if os.path.exists(REPORT_DIR):
+    app.mount("/reports", StaticFiles(directory=REPORT_DIR), name="reports")
 
 FOOTBALL_API_KEY = "YOUR_API_KEY_HERE"   # Dung chung key voi fetch_fixtures.py
 
@@ -47,6 +60,164 @@ def load_history():
     df = pd.read_csv(CLEAN_PATH)
     df["Date"] = pd.to_datetime(df["Date"])
     return df.sort_values("Date").reset_index(drop=True)
+
+
+def _safe_number(value, default=None, digits=None):
+    if pd.isna(value):
+        return default
+    try:
+        value = float(value)
+    except (TypeError, ValueError):
+        return default
+    if digits is not None:
+        value = round(value, digits)
+    return int(value) if float(value).is_integer() else value
+
+
+def _team_match_result(row, team):
+    is_home = row["HomeTeam"] == team
+    gf = int(row["FTHG"] if is_home else row["FTAG"])
+    ga = int(row["FTAG"] if is_home else row["FTHG"])
+
+    if gf > ga:
+        result = "W"
+        points = 3
+    elif gf == ga:
+        result = "D"
+        points = 1
+    else:
+        result = "L"
+        points = 0
+
+    return {
+        "date": row["Date"].strftime("%Y-%m-%d"),
+        "opponent": row["AwayTeam"] if is_home else row["HomeTeam"],
+        "venue": "H" if is_home else "A",
+        "result": result,
+        "score": f"{gf}-{ga}",
+        "gf": gf,
+        "ga": ga,
+        "points": points,
+    }
+
+
+def _summarize_team_matches(matches, team):
+    rows = [_team_match_result(row, team) for _, row in matches.iterrows()]
+    wins = sum(1 for row in rows if row["result"] == "W")
+    draws = sum(1 for row in rows if row["result"] == "D")
+    losses = sum(1 for row in rows if row["result"] == "L")
+    gf = sum(row["gf"] for row in rows)
+    ga = sum(row["ga"] for row in rows)
+    points = sum(row["points"] for row in rows)
+
+    played = len(rows)
+    return {
+        "played": played,
+        "wins": wins,
+        "draws": draws,
+        "losses": losses,
+        "points": points,
+        "ppg": round(points / played, 2) if played else 0,
+        "gf": gf,
+        "ga": ga,
+        "gf_avg": round(gf / played, 2) if played else 0,
+        "ga_avg": round(ga / played, 2) if played else 0,
+        "clean_sheets": sum(1 for row in rows if row["ga"] == 0),
+        "form": " ".join(row["result"] for row in rows) if rows else "N/A",
+        "matches": rows,
+    }
+
+
+def _h2h_matches(matches, home_team):
+    rows = []
+    for _, row in matches.iterrows():
+        home_goals = int(row["FTHG"])
+        away_goals = int(row["FTAG"])
+
+        if row["HomeTeam"] == home_team:
+            gf, ga = home_goals, away_goals
+            opponent = row["AwayTeam"]
+            venue = "H"
+        else:
+            gf, ga = away_goals, home_goals
+            opponent = row["HomeTeam"]
+            venue = "A"
+
+        result = "W" if gf > ga else "D" if gf == ga else "L"
+        rows.append({
+            "date": row["Date"].strftime("%Y-%m-%d"),
+            "opponent": opponent,
+            "venue": venue,
+            "result": result,
+            "score": f"{gf}-{ga}",
+        })
+    return rows
+
+
+def _fixture_feature_row(history, fixture):
+    date = pd.to_datetime(fixture.get("date"), errors="coerce")
+    if pd.isna(date):
+        return None
+
+    mask = (
+        (history["Date"] == date) &
+        (history["HomeTeam"] == fixture.get("home")) &
+        (history["AwayTeam"] == fixture.get("away"))
+    )
+    if not mask.any():
+        return None
+    return history[mask].iloc[0]
+
+
+def enrich_predictions(df):
+    history = load_history()
+    rows = []
+
+    for row in df.to_dict(orient="records"):
+        match_date = pd.to_datetime(row.get("date"), errors="coerce")
+        home_team = row.get("home")
+        away_team = row.get("away")
+
+        if pd.isna(match_date) or not home_team or not away_team:
+            rows.append(row)
+            continue
+
+        current_season = history["Season"].max()
+        before_all = history[history["Date"] < match_date]
+        before = before_all[before_all["Season"] == current_season]
+
+        home_all = before[(before["HomeTeam"] == home_team) | (before["AwayTeam"] == home_team)].tail(5)
+        away_all = before[(before["HomeTeam"] == away_team) | (before["AwayTeam"] == away_team)].tail(5)
+        home_home = before[before["HomeTeam"] == home_team].tail(5)
+        away_away = before[before["AwayTeam"] == away_team].tail(5)
+        h2h = before_all[
+            ((before_all["HomeTeam"] == home_team) & (before_all["AwayTeam"] == away_team)) |
+            ((before_all["HomeTeam"] == away_team) & (before_all["AwayTeam"] == home_team))
+        ].tail(6)
+
+        feature_row = _fixture_feature_row(history, row)
+        if feature_row is not None:
+            row.update({
+                "home_position": _safe_number(feature_row.get("home_position")),
+                "away_position": _safe_number(feature_row.get("away_position")),
+                "home_points": _safe_number(feature_row.get("home_points")),
+                "away_points": _safe_number(feature_row.get("away_points")),
+                "home_motivation": _safe_number(feature_row.get("home_motivation"), digits=2),
+                "away_motivation": _safe_number(feature_row.get("away_motivation"), digits=2),
+                "home_venue_form_score": _safe_number(feature_row.get("home_venue_form"), digits=2),
+                "away_venue_form_score": _safe_number(feature_row.get("away_venue_form"), digits=2),
+            })
+
+        row.update({
+            "home_recent": _summarize_team_matches(home_all, home_team),
+            "away_recent": _summarize_team_matches(away_all, away_team),
+            "home_home_record": _summarize_team_matches(home_home, home_team),
+            "away_away_record": _summarize_team_matches(away_away, away_team),
+            "h2h_matches": _h2h_matches(h2h, home_team),
+        })
+        rows.append(row)
+
+    return rows
 
 
 # ------------------------------------------------------------------------------
@@ -73,8 +244,28 @@ def get_latest_predictions():
 
     return {
         "gameweek": gw,
-        "matches":  df.to_dict(orient="records"),
+        "matches":  enrich_predictions(df),
     }
+
+
+# ------------------------------------------------------------------------------
+# GET /api/predictions/gameweeks
+# Tra ve danh sach gameweek dang co file prediction
+# ------------------------------------------------------------------------------
+
+@app.get("/api/predictions/gameweeks")
+def get_prediction_gameweeks():
+    files = glob.glob(os.path.join(PRED_DIR, "gw*_predictions.csv"))
+
+    gameweeks = []
+    for path in files:
+        try:
+            gw = int(os.path.basename(path).replace("gw", "").replace("_predictions.csv", ""))
+            gameweeks.append(gw)
+        except ValueError:
+            continue
+
+    return {"gameweeks": sorted(set(gameweeks))}
 
 
 # ------------------------------------------------------------------------------
@@ -91,7 +282,7 @@ def get_predictions(gameweek: int):
     df = pd.read_csv(path)
     return {
         "gameweek": gameweek,
-        "matches":  df.to_dict(orient="records"),
+        "matches":  enrich_predictions(df),
     }
 
 
@@ -102,6 +293,27 @@ def get_predictions(gameweek: int):
 
 @app.get("/api/accuracy")
 def get_accuracy():
+    if os.path.exists(ACC_COMPARE):
+        df_cmp = pd.read_csv(ACC_COMPARE).sort_values("gameweek")
+        df = pd.DataFrame({
+            "gameweek": df_cmp["gameweek"],
+            "correct":  df_cmp["new_correct"].astype(int),
+            "total":    df_cmp["total"].astype(int),
+            "accuracy": df_cmp["new_accuracy"].astype(float),
+        })
+
+        total_c = int(df["correct"].sum())
+        total_t = int(df["total"].sum())
+        overall = round(total_c / total_t, 4) if total_t > 0 else None
+
+        return {
+            "history": df.to_dict(orient="records"),
+            "overall": overall,
+            "total_correct": total_c,
+            "total_matches": total_t,
+            "source": "accuracy_comparison",
+        }
+
     if not os.path.exists(ACC_LOG):
         return {"history": [], "overall": None}
 
@@ -115,6 +327,7 @@ def get_accuracy():
         "overall": overall,
         "total_correct": total_c,
         "total_matches": total_t,
+        "source": "accuracy_log",
     }
 
 
@@ -207,13 +420,21 @@ def get_model_info():
         raise HTTPException(status_code=404, detail="Chua co model")
 
     data = load_model()
+    feature_cols = data.get("feature_cols") or []
     return {
         "model_name":   data.get("model_name"),
         "version":      data.get("version"),
         "val_acc":      data.get("val_acc"),
+        "test_acc":     data.get("test_acc"),
+        "draw_boost":   data.get("draw_boost"),
         "train_size":   data.get("train_size"),
         "retrained_on": data.get("retrained_on"),
-        "feature_cols": data.get("feature_cols"),
+        "feature_cols": feature_cols,
+        "feature_count": len(feature_cols),
+        "reports": {
+            "confusion_matrix": "/reports/confusion_matrix.png",
+            "feature_importance": "/reports/feature_importance.png",
+        },
     }
 
 

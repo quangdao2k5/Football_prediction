@@ -1,11 +1,46 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
-export default function Predictions({ data }) {
+export default function Predictions({ data, apiBase, gameweeks = [] }) {
     const [selectedMatch, setSelectedMatch] = useState(null);
+    const [currentData, setCurrentData] = useState(data);
+    const [selectedGw, setSelectedGw] = useState(data?.gameweek || null);
+    const [loadingGw, setLoadingGw] = useState(false);
+    const [activeGroup, setActiveGroup] = useState(null);
+    const [error, setError] = useState(null);
 
-    if (!data) return <div className="empty">Chưa có dữ liệu dự đoán.</div>;
-  
-    const { gameweek, matches } = data;
+    useEffect(() => {
+      setCurrentData(data);
+      setSelectedGw(data?.gameweek || null);
+      setActiveGroup(null);
+    }, [data]);
+
+    const availableGameweeks = gameweeks.length
+      ? gameweeks
+      : (data?.gameweek ? [data.gameweek] : []);
+
+    const loadGameweek = async (gw) => {
+      if (!apiBase || gw === selectedGw) return;
+
+      setLoadingGw(true);
+      setError(null);
+      try {
+        const res = await fetch(`${apiBase}/predictions/${gw}`);
+        if (!res.ok) throw new Error(`Không tải được GW${gw}`);
+        const next = await res.json();
+        setCurrentData(next);
+        setSelectedGw(gw);
+        setSelectedMatch(null);
+        setActiveGroup(null);
+      } catch (err) {
+        setError(err.message || "Không tải được dữ liệu gameweek");
+      } finally {
+        setLoadingGw(false);
+      }
+    };
+
+    if (!currentData) return <div className="empty">Chưa có dữ liệu dự đoán.</div>;
+
+    const { gameweek, matches = [] } = currentData;
   
     const resultColor = (pred) => {
       if (pred === "Home Win") return "var(--green)";
@@ -16,6 +51,12 @@ export default function Predictions({ data }) {
     const resultLabel = (pred) => {
       if (pred === "Home Win") return "Đội nhà thắng";
       if (pred === "Away Win") return "Đội khách thắng";
+      return "Hoà";
+    };
+
+    const shortResultLabel = (pred) => {
+      if (pred === "Home Win") return "Nhà thắng";
+      if (pred === "Away Win") return "Khách thắng";
       return "Hoà";
     };
 
@@ -36,11 +77,27 @@ export default function Predictions({ data }) {
     };
 
     const getConfidence = (m) => {
-      const maxProb = Math.max(m["home_win%"], m["draw%"], m["away_win%"]);
-      if (maxProb >= 70) return { level: "Rất cao", color: "var(--green)", icon: "🔥" };
-      if (maxProb >= 55) return { level: "Cao", color: "var(--accent)", icon: "💪" };
-      if (maxProb >= 45) return { level: "Trung bình", color: "var(--yellow)", icon: "⚖️" };
-      return { level: "Thấp", color: "var(--text-muted)", icon: "🤔" };
+      const probs = [
+        { key: "H", label: "Nhà thắng", value: Number(m["home_win%"]) || 0 },
+        { key: "D", label: "Hoà", value: Number(m["draw%"]) || 0 },
+        { key: "A", label: "Khách thắng", value: Number(m["away_win%"]) || 0 },
+      ].sort((a, b) => b.value - a.value);
+
+      const maxProb = probs[0]?.value || 0;
+      const runnerUp = probs[1] || { label: "lựa chọn khác", value: 0 };
+      const margin = Number((maxProb - runnerUp.value).toFixed(1));
+      const base = { maxProb, margin, leader: probs[0], runnerUp };
+
+      if (maxProb >= 65 && margin >= 20) {
+        return { ...base, level: "Rất cao", color: "var(--green)", className: "high" };
+      }
+      if (maxProb >= 55 && margin >= 12) {
+        return { ...base, level: "Cao", color: "var(--accent)", className: "good" };
+      }
+      if (maxProb >= 45 && margin >= 8) {
+        return { ...base, level: "Trung bình", color: "var(--yellow)", className: "medium" };
+      }
+      return { ...base, level: "Cân bằng", color: "var(--text-muted)", className: "low" };
     };
 
     const getFormPoints = (formStr) => {
@@ -52,6 +109,192 @@ export default function Predictions({ data }) {
       });
       return pts;
     };
+
+    const formatNumber = (value, digits = 1) => {
+      const num = Number(value) || 0;
+      return num.toFixed(digits).replace(/\.0$/, "");
+    };
+
+    const formatPercent = (value) => `${formatNumber(value)}%`;
+
+    const getMatchNotes = (m) => {
+      const confidence = getConfidence(m);
+      const homeFormPts = getFormPoints(m.home_form_str);
+      const awayFormPts = getFormPoints(m.away_form_str);
+      const eloDiff = Math.round((Number(m.home_elo) || 0) - (Number(m.away_elo) || 0));
+      const gfDiff = Number(((Number(m.home_gf) || 0) - (Number(m.away_gf) || 0)).toFixed(1));
+      const drawProb = Number(m["draw%"]) || 0;
+      const eloNote = eloDiff > 0
+        ? `${m.home} cao hơn ${m.away} ${Math.abs(eloDiff)} điểm ELO.`
+        : eloDiff < 0
+          ? `${m.away} cao hơn ${m.home} ${Math.abs(eloDiff)} điểm ELO.`
+          : `${m.home} và ${m.away} đang ngang bằng ELO.`;
+      const scoringNote = gfDiff > 0
+        ? `${m.home} ghi nhiều hơn ${m.away} ${formatNumber(Math.abs(gfDiff))} bàn/trận gần đây.`
+        : gfDiff < 0
+          ? `${m.away} ghi nhiều hơn ${m.home} ${formatNumber(Math.abs(gfDiff))} bàn/trận gần đây.`
+          : `${m.home} và ${m.away} có hiệu suất ghi bàn gần đây ngang nhau.`;
+
+      const notes = [
+        `Dự đoán chính: ${confidence.leader.label} với xác suất ${formatPercent(confidence.maxProb)}. Xác suất chi tiết: Nhà ${formatPercent(m["home_win%"])}, Hoà ${formatPercent(m["draw%"])}, Khách ${formatPercent(m["away_win%"])}.`,
+        `Phong độ 5 trận gần nhất: ${m.home} giành ${homeFormPts} điểm, ${m.away} giành ${awayFormPts} điểm.`,
+        eloNote,
+        scoringNote,
+      ];
+
+      if (drawProb >= 25) {
+        notes.push(`Cửa hoà đáng chú ý ở mức ${formatPercent(drawProb)}, nên trận này không quá một chiều.`);
+      }
+
+      return notes.slice(0, 4);
+    };
+
+    const recordLabel = (record) => {
+      if (!record || !record.played) return "Chưa đủ dữ liệu";
+      return `${record.wins}T ${record.draws}H ${record.losses}B`;
+    };
+
+    const pctOrDash = (value) => {
+      if (value === null || value === undefined || Number.isNaN(Number(value))) return "—";
+      return `${Math.round(Number(value) * 100)}%`;
+    };
+
+    const ResultPill = ({ result }) => (
+      <span className={`result-pill ${result}`}>{result}</span>
+    );
+
+    const RecentMatchList = ({ matches: recentMatches = [] }) => {
+      if (!recentMatches.length) {
+        return <div className="mini-empty">Chưa đủ dữ liệu trước trận.</div>;
+      }
+
+      return (
+        <div className="recent-list">
+          {recentMatches.slice().reverse().map((item, idx) => (
+            <div className="recent-item" key={`${item.date}-${item.opponent}-${idx}`}>
+              <ResultPill result={item.result} />
+              <span className="recent-opponent">
+                <span className="recent-venue">{item.venue === "H" ? "Sân nhà" : "Sân khách"}</span>
+                <span>{item.opponent}</span>
+              </span>
+              <span className="recent-score">{item.score}</span>
+            </div>
+          ))}
+        </div>
+      );
+    };
+
+    const H2HMatchList = ({ matches: h2hMatches = [], team }) => {
+      if (!h2hMatches.length) {
+        return <div className="mini-empty">Chưa có trận đối đầu gần đây trong dữ liệu trước trận.</div>;
+      }
+
+      const resultText = {
+        W: "thắng",
+        D: "hoà",
+        L: "thua",
+      };
+
+      const tagLabel = h2hMatches.length === 1
+        ? "Lần đối đầu gần nhất"
+        : "Lần gặp trước";
+
+      return (
+        <div className="h2h-match-list">
+          {h2hMatches.slice().reverse().map((item, idx) => (
+            <div className="h2h-match-row" key={`${item.date}-${item.opponent}-${idx}`}>
+              <span className={`history-tag ${item.result}`}>{tagLabel}</span>
+              <span className="h2h-match-text">
+                <strong>{team} {resultText[item.result] || ""} {item.opponent} {item.score}</strong>
+                <small>{item.date} · {team} đá {item.venue === "H" ? "sân nhà" : "sân khách"} ở trận đó</small>
+              </span>
+            </div>
+          ))}
+        </div>
+      );
+    };
+
+    const VenueRecordCard = ({ title, team, record }) => (
+      <div className="venue-card">
+        <div className="venue-card-head">
+          <div>
+            <div className="venue-title">{title}</div>
+            <div className="venue-team">{team}</div>
+          </div>
+          <div className="venue-record">{recordLabel(record)}</div>
+        </div>
+        <div className="venue-metrics">
+          <span><strong>{record?.ppg ?? 0}</strong> điểm/trận</span>
+          <span><strong>{record?.gf_avg ?? 0}</strong> bàn ghi/trận</span>
+          <span><strong>{record?.ga_avg ?? 0}</strong> bàn thua/trận</span>
+          <span><strong>{record?.clean_sheets ?? 0}</strong> sạch lưới</span>
+        </div>
+        {renderForm(record?.form)}
+        <RecentMatchList matches={record?.matches || []} />
+      </div>
+    );
+
+    const isClearTrend = (m) => {
+      const confidence = getConfidence(m);
+      return confidence.className === "high" || confidence.className === "good";
+    };
+
+    const isBalancedMatch = (m) => getConfidence(m).className === "low";
+
+    const isDrawWatch = (m) => (Number(m["draw%"]) || 0) >= 25;
+
+    const getGroupReason = (m, groupId) => {
+      const confidence = getConfidence(m);
+      if (groupId === "clear") {
+        return `Độ tin cậy ${confidence.level.toLowerCase()}, xác suất chọn ${formatPercent(confidence.maxProb)}.`;
+      }
+      if (groupId === "balanced") {
+        return `Ba cửa khá sát nhau: Nhà ${formatPercent(m["home_win%"])}, Hoà ${formatPercent(m["draw%"])}, Khách ${formatPercent(m["away_win%"])}.`;
+      }
+      if (groupId === "draw") {
+        return `Xác suất hoà ${formatPercent(m["draw%"])}.`;
+      }
+      return "";
+    };
+
+    const summary = matches.reduce((acc, m) => {
+      const confidence = getConfidence(m);
+      acc.maxProbSum += confidence.maxProb;
+      if (isClearTrend(m)) acc.clear += 1;
+      if (isBalancedMatch(m)) acc.balanced += 1;
+      if (isDrawWatch(m)) acc.drawWatch += 1;
+      if (m.prediction === "Home Win") acc.home += 1;
+      else if (m.prediction === "Away Win") acc.away += 1;
+      else acc.draw += 1;
+      return acc;
+    }, { maxProbSum: 0, clear: 0, balanced: 0, drawWatch: 0, home: 0, away: 0, draw: 0 });
+
+    const avgConfidence = matches.length
+      ? Math.round(summary.maxProbSum / matches.length)
+      : 0;
+
+    const groupConfig = {
+      clear: {
+        title: "Trận rõ xu hướng",
+        count: summary.clear,
+        filter: isClearTrend,
+      },
+      balanced: {
+        title: "Trận cân bằng",
+        count: summary.balanced,
+        filter: isBalancedMatch,
+      },
+      draw: {
+        title: "Cửa hoà đáng chú ý",
+        count: summary.drawWatch,
+        filter: isDrawWatch,
+      },
+    };
+
+    const activeGroupConfig = activeGroup ? groupConfig[activeGroup] : null;
+    const activeGroupMatches = activeGroupConfig
+      ? matches.filter(activeGroupConfig.filter)
+      : [];
 
     // SVG donut chart for probabilities
     const ProbDonut = ({ homeP, drawP, awayP, prediction }) => {
@@ -178,20 +421,125 @@ export default function Predictions({ data }) {
       );
     };
 
-    return (
-      <div className="section">
-        <div className="section-header">
-          <h2>Dự đoán Gameweek {gameweek}</h2>
-          <span className="badge">{matches.length} trận</span>
-        </div>
-  
-        <div className="match-grid">
-          {matches.map((m, i) => {
-            return (
-              <div className="match-card clickable" key={i} onClick={() => setSelectedMatch(m)}>
-                <div className="match-date">{m.date}</div>
-  
-                <div className="match-teams">
+	    return (
+	      <div className="section">
+	        <div className="section-header">
+	          <div>
+	            <h2>Dự đoán Gameweek {gameweek}</h2>
+	            <p className="section-subtitle">Các xác suất được tính từ dữ liệu trước trận: phong độ, ELO, hiệu suất ghi bàn, phòng ngự và đối đầu.</p>
+	          </div>
+	          <span className="badge">{matches.length} trận</span>
+	        </div>
+
+	        {availableGameweeks.length > 1 && (
+	          <div className="gw-selector" aria-label="Chọn gameweek">
+	            {availableGameweeks.map(gw => (
+	              <button
+	                key={gw}
+	                className={`gw-btn ${gw === gameweek ? "active" : ""}`}
+	                onClick={() => loadGameweek(gw)}
+	                disabled={loadingGw}
+	              >
+	                GW{gw}
+	              </button>
+	            ))}
+	          </div>
+	        )}
+
+	        {error && <div className="inline-error">{error}</div>}
+
+	        <div className="prediction-overview">
+	          <div className="metric-tile">
+	            <span className="metric-value">{avgConfidence}%</span>
+	            <span
+	              className="metric-label"
+	              title="Trung bình xác suất của phương án được model chọn ở mỗi trận."
+	            >
+	              Độ tự tin dự đoán TB
+	            </span>
+	          </div>
+	          <button
+	            type="button"
+	            className={`metric-tile metric-action ${activeGroup === "clear" ? "active" : ""}`}
+	            onClick={() => setActiveGroup(activeGroup === "clear" ? null : "clear")}
+	          >
+	            <span className="metric-value">{summary.clear}</span>
+	            <span className="metric-label">Trận rõ xu hướng</span>
+	          </button>
+	          <button
+	            type="button"
+	            className={`metric-tile metric-action ${activeGroup === "balanced" ? "active" : ""}`}
+	            onClick={() => setActiveGroup(activeGroup === "balanced" ? null : "balanced")}
+	          >
+	            <span className="metric-value">{summary.balanced}</span>
+	            <span className="metric-label">Trận cân bằng</span>
+	          </button>
+	          <button
+	            type="button"
+	            className={`metric-tile metric-action ${activeGroup === "draw" ? "active" : ""}`}
+	            onClick={() => setActiveGroup(activeGroup === "draw" ? null : "draw")}
+	          >
+	            <span className="metric-value">{summary.drawWatch}</span>
+	            <span className="metric-label">Cửa hoà đáng chú ý</span>
+	          </button>
+	          <div className="metric-tile wide">
+	            <span className="metric-value compact">{summary.home}H · {summary.draw}D · {summary.away}A</span>
+	            <span className="metric-label">Phân bố dự đoán</span>
+	          </div>
+	        </div>
+
+	        {activeGroupConfig && (
+	          <div className="group-panel">
+	            <div className="group-panel-header">
+	              <div>
+	                <h3>{activeGroupConfig.title}</h3>
+	                <p>{activeGroupMatches.length} trận thuộc nhóm này trong GW{gameweek}</p>
+	              </div>
+	              <button type="button" className="group-close" onClick={() => setActiveGroup(null)}>
+	                Đóng
+	              </button>
+	            </div>
+	            {activeGroupMatches.length > 0 ? (
+	              <div className="group-match-list">
+	                {activeGroupMatches.map((m) => {
+	                  const confidence = getConfidence(m);
+	                  return (
+	                    <button
+	                      type="button"
+	                      className="group-match-row"
+	                      key={`${activeGroup}-${m.home}-${m.away}`}
+	                      onClick={() => setSelectedMatch(m)}
+	                    >
+	                      <span className={`confidence-chip ${confidence.className}`}>{confidence.level}</span>
+	                      <span className="group-match-teams">{m.home} vs {m.away}</span>
+	                      <span className="group-match-pred">{resultLabel(m.prediction)}</span>
+	                      <span className="group-match-reason">{getGroupReason(m, activeGroup)}</span>
+	                    </button>
+	                  );
+	                })}
+	              </div>
+	            ) : (
+	              <div className="mini-empty">Không có trận nào trong nhóm này.</div>
+	            )}
+	          </div>
+	        )}
+	  
+	        <div className="match-grid">
+	          {matches.map((m, i) => {
+	            const confidence = getConfidence(m);
+	            const isActiveGroupMatch = activeGroupConfig?.filter(m);
+	            return (
+	              <div
+	                className={`match-card clickable ${confidence.margin <= 10 ? "balanced" : ""} ${isActiveGroupMatch ? "group-highlight" : ""} ${activeGroup && !isActiveGroupMatch ? "group-dim" : ""}`}
+	                key={`${gameweek}-${m.home}-${m.away}`}
+	                onClick={() => setSelectedMatch(m)}
+	              >
+	                <div className="match-topline">
+	                  <div className="match-date">{m.date}</div>
+	                  <span className={`confidence-chip ${confidence.className}`}>{confidence.level}</span>
+	                </div>
+	  
+	                <div className="match-teams">
                   <span className={`team ${m.prediction === "Home Win" ? "winner" : ""}`}>
                     {m.home}
                   </span>
@@ -223,14 +571,14 @@ export default function Predictions({ data }) {
                     </div>
                     <span className="prob-val">{m["away_win%"]}%</span>
                   </div>
-                </div>
-  
-                <div className="prediction-label" style={{ color: resultColor(m.prediction) }}>
-                  {m.prediction}
-                </div>
-              </div>
-            );
-          })}
+	                </div>
+	  
+	                <div className="prediction-label" style={{ color: resultColor(m.prediction) }}>
+	                  {resultLabel(m.prediction)}
+	                </div>
+	              </div>
+	            );
+	          })}
         </div>
 
         {/* ====== REDESIGNED MODAL ====== */}
@@ -241,13 +589,25 @@ export default function Predictions({ data }) {
           const confidence = getConfidence(m);
           const homeFormPts = getFormPoints(m.home_form_str);
           const awayFormPts = getFormPoints(m.away_form_str);
+          const matchNotes = getMatchNotes(m);
 
-          // Parse H2H string
+          const h2hMatches = m.h2h_matches || [];
+
+          // Parse H2H string as fallback when detailed H2H rows are unavailable.
           const h2hMatch = (m.h2h_str || "").match(/Thắng (\d+).*Hòa (\d+).*Thua (\d+)/);
-          const h2hWins = h2hMatch ? parseInt(h2hMatch[1]) : 0;
-          const h2hDraws = h2hMatch ? parseInt(h2hMatch[2]) : 0;
-          const h2hLosses = h2hMatch ? parseInt(h2hMatch[3]) : 0;
+          const h2hWins = h2hMatches.length
+            ? h2hMatches.filter(item => item.result === "W").length
+            : h2hMatch ? parseInt(h2hMatch[1]) : 0;
+          const h2hDraws = h2hMatches.length
+            ? h2hMatches.filter(item => item.result === "D").length
+            : h2hMatch ? parseInt(h2hMatch[2]) : 0;
+          const h2hLosses = h2hMatches.length
+            ? h2hMatches.filter(item => item.result === "L").length
+            : h2hMatch ? parseInt(h2hMatch[3]) : 0;
           const h2hTotal = h2hWins + h2hDraws + h2hLosses || 1;
+          const h2hLabel = h2hTotal >= 6
+            ? "6 trận gần nhất"
+            : `${h2hTotal} trận gần nhất có dữ liệu`;
 
           return (
             <div className="modal-overlay" onClick={() => setSelectedMatch(null)}>
@@ -290,25 +650,56 @@ export default function Predictions({ data }) {
                     <div className="detail-pred-result" style={{ color: resultColor(m.prediction) }}>
                       {resultLabel(m.prediction)}
                     </div>
-                    <div className="detail-confidence">
-                      <span className="confidence-icon">{confidence.icon}</span>
-                      <span>Độ tin cậy: </span>
-                      <strong style={{ color: confidence.color }}>{confidence.level}</strong>
-                    </div>
+	                    <div className="detail-confidence">
+	                      <span>Độ tin cậy: </span>
+	                      <strong style={{ color: confidence.color }}>{confidence.level}</strong>
+	                    </div>
                     <div className="detail-prob-legend">
                       <span className="prob-legend-item"><span className="legend-dot home"></span>Nhà {m["home_win%"]}%</span>
                       <span className="prob-legend-item"><span className="legend-dot draw"></span>Hoà {m["draw%"]}%</span>
                       <span className="prob-legend-item"><span className="legend-dot away"></span>Khách {m["away_win%"]}%</span>
                     </div>
-                  </div>
-                </div>
+	                  </div>
+	                </div>
 
-                {/* ── Form Section ── */}
-                <div className="detail-section">
-                  <div className="detail-section-title">
-                    <span className="section-icon">📊</span>
-                    Phong Độ Gần Đây
+	                <div className="detail-section">
+	                  <div className="detail-section-title">
+	                    Yếu tố trước trận
+	                  </div>
+	                  <div className="factor-list">
+	                    {matchNotes.map((note, idx) => (
+	                      <div className="factor-item" key={idx}>{note}</div>
+	                    ))}
+	                  </div>
+	                </div>
+
+                {(m.home_position || m.away_position || m.home_points || m.away_points) && (
+                  <div className="detail-section">
+                    <div className="detail-section-title">
+                      Vị trí trước trận
+                    </div>
+                    <div className="table-context-grid">
+                      <div className="table-context-card">
+                        <span className="context-team">{m.home}</span>
+                        <strong>#{m.home_position ?? "—"}</strong>
+                        <span>{m.home_points ?? "—"} điểm</span>
+                        <small>Động lực {pctOrDash(m.home_motivation)}</small>
+                      </div>
+                      <div className="table-context-card">
+                        <span className="context-team">{m.away}</span>
+                        <strong>#{m.away_position ?? "—"}</strong>
+                        <span>{m.away_points ?? "—"} điểm</span>
+                        <small>Động lực {pctOrDash(m.away_motivation)}</small>
+                      </div>
+                    </div>
                   </div>
+                )}
+
+	                {/* ── Form Section ── */}
+	                <div className="detail-section">
+	                  <div className="detail-section-title">
+	                    Phong Độ Gần Đây
+	                  </div>
                   <div className="detail-form-row">
                     <div className="detail-form-side home">
                       {renderForm(m.home_form_str)}
@@ -322,12 +713,29 @@ export default function Predictions({ data }) {
                   </div>
                 </div>
 
-                {/* ── Stats Comparison ── */}
                 <div className="detail-section">
                   <div className="detail-section-title">
-                    <span className="section-icon">⚔️</span>
-                    So Sánh Chỉ Số
+                    Sân nhà / sân khách
                   </div>
+                  <div className="venue-grid">
+                    <VenueRecordCard
+                      title="Sân nhà gần đây"
+                      team={m.home}
+                      record={m.home_home_record}
+                    />
+                    <VenueRecordCard
+                      title="Sân khách gần đây"
+                      team={m.away}
+                      record={m.away_away_record}
+                    />
+                  </div>
+                </div>
+
+                {/* ── Stats Comparison ── */}
+	                <div className="detail-section">
+	                  <div className="detail-section-title">
+	                    So Sánh Chỉ Số
+	                  </div>
                   <div className="detail-stats-grid">
                     <ComparisonBar homeVal={m.home_gf} awayVal={m.away_gf} label="Bàn thắng / trận" />
                     <ComparisonBar homeVal={m.home_ga} awayVal={m.away_ga} label="Bàn thua / trận" higherIsBetter={false} />
@@ -337,11 +745,10 @@ export default function Predictions({ data }) {
                 </div>
 
                 {/* ── H2H Section ── */}
-                <div className="detail-section">
-                  <div className="detail-section-title">
-                    <span className="section-icon">🤝</span>
-                    Lịch Sử Đối Đầu
-                    <span className="h2h-sub">(6 trận gần nhất)</span>
+	                <div className="detail-section">
+	                  <div className="detail-section-title">
+	                    Lịch Sử Đối Đầu
+                    <span className="h2h-sub">({h2hLabel})</span>
                   </div>
                   <div className="h2h-visual">
                     <div className="h2h-bar-container">
@@ -360,7 +767,8 @@ export default function Predictions({ data }) {
                       <span className="h2h-legend-item draw">Hoà {h2hDraws}</span>
                       <span className="h2h-legend-item loss">Thua {h2hLosses}</span>
                     </div>
-                    <div className="h2h-note">* Tính từ góc nhìn của {m.home}</div>
+                    <div className="h2h-note">* Thống kê tính từ góc nhìn của {m.home}.</div>
+                    <H2HMatchList matches={h2hMatches} team={m.home} />
                   </div>
                 </div>
 

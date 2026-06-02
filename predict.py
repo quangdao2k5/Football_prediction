@@ -1,11 +1,16 @@
 """
-BUOC 4a: Du doan ket qua tran dau EPL theo gameweek
+BUOC 4a: Du doan ket qua tran dau EPL theo gameweek (v2)
 =====================================================
 Input:  models/model_best.pkl
         models/scaler.pkl
         data/epl_clean.csv        <- lich su de tinh features
 Output: In ket qua du doan ra terminal
         predictions/gw{N}_predictions.csv
+
+Thay doi v2:
+  - Bo prior correction (bug logic)
+  - Them draw-aware prediction voi draw_boost tu model
+  - Them features: season_progress, motivation, draw_rate, momentum
 
 Chay: python predict.py
 """
@@ -20,6 +25,7 @@ os.makedirs("predictions", exist_ok=True)
 
 ELO_DEFAULT = 1500
 ELO_K       = 20
+ELO_REGRESS = 0.7    # Dong bo voi clean_data.py
 FORM_N      = 5
 DECAY       = 0.75
 
@@ -35,8 +41,12 @@ model       = model_data["model"]
 scaler      = model_data.get("scaler")
 feat_cols   = model_data["feature_cols"]
 model_name  = model_data["model_name"]
+draw_boost  = model_data.get("draw_boost", 0.0)   # Draw boost tu train
 
-print(f"Model: {model_name} (v{model_data.get('version', '?')})")
+version = str(model_data.get("version", "?"))
+version_label = version if version.startswith("v") else f"v{version}"
+print(f"Model: {model_name} ({version_label})")
+print(f"Draw Boost: {draw_boost:.2f}")
 print(f"Features: {feat_cols}")
 print()
 
@@ -210,9 +220,6 @@ def get_h2h_stats(df, home, away, n=6):
     return f"Thắng {home_wins} - Hòa {draws} - Thua {away_wins}"
 
 
-# [DA XOA] get_home_advantage — da loai bo vi gay thien vi san nha
-
-
 def get_season_gd(df, team, season):
     """Goal difference tinh den hien tai trong mua."""
     season_games = df[
@@ -319,6 +326,222 @@ def get_streak(df, team, streak_type="win"):
     return streak
 
 
+def get_rest_days(df, team, match_date):
+    """So ngay nghi tu tran gan nhat den ngay thi dau hien tai."""
+    games = df[(df["HomeTeam"] == team) | (df["AwayTeam"] == team)]
+    if len(games) == 0:
+        return 7
+    last_date = games.iloc[-1]["Date"]
+    return int((match_date - last_date).days)
+
+
+# --- [MOI v2] Features moi ---
+
+def get_season_progress(df, team, season):
+    """So tran da da / 38."""
+    season_games = df[
+        (df["Season"] == season) &
+        ((df["HomeTeam"] == team) | (df["AwayTeam"] == team))
+    ]
+    return len(season_games) / 38.0
+
+
+def get_standings_context(df, team, season):
+    """
+    Tra ve (gap_to_top, gap_to_rel, motivation) cho doi trong mua.
+    """
+    season_df = df[df["Season"] == season]
+    if len(season_df) == 0:
+        return 0, 0, 1.0
+
+    # Tinh bang diem
+    teams_pts = {}
+    teams_mp  = {}
+    for _, row in season_df.iterrows():
+        h, a = row["HomeTeam"], row["AwayTeam"]
+        teams_pts.setdefault(h, 0)
+        teams_pts.setdefault(a, 0)
+        teams_mp.setdefault(h, 0)
+        teams_mp.setdefault(a, 0)
+
+        if row["FTR"] == "H":
+            teams_pts[h] += 3
+        elif row["FTR"] == "D":
+            teams_pts[h] += 1
+            teams_pts[a] += 1
+        else:
+            teams_pts[a] += 3
+
+        teams_mp[h] += 1
+        teams_mp[a] += 1
+
+    if team not in teams_pts:
+        return 0, 0, 1.0
+
+    my_pts = teams_pts[team]
+    my_mp  = teams_mp.get(team, 0)
+    all_pts = sorted(teams_pts.values(), reverse=True)
+
+    leader_pts = all_pts[0]
+    rel_idx = min(17, len(all_pts) - 1)
+    rel_pts = all_pts[rel_idx]
+
+    gap_top = my_pts - leader_pts
+    gap_rel = my_pts - rel_pts
+
+    remaining = max(1, 38 - my_mp)
+    max_possible = my_pts + remaining * 3
+    can_top = max_possible >= leader_pts
+    safe    = my_pts - rel_pts > remaining * 1.5
+    motivation = 1.0 if (can_top or not safe) else 0.5
+
+    return gap_top, gap_rel, motivation
+
+
+def get_draw_rate(df, team, n=FORM_N):
+    """Ti le hoa trong n tran gan nhat."""
+    games = df[(df["HomeTeam"] == team) | (df["AwayTeam"] == team)].tail(n)
+    if len(games) == 0:
+        return 0.25
+    draws = (games["FTR"] == "D").sum()
+    return draws / len(games)
+
+
+def get_form_momentum(df, team, n_short=3, n_long=8):
+    """Form ngan han - form dai han. Duong = dang len form."""
+    games = df[(df["HomeTeam"] == team) | (df["AwayTeam"] == team)]
+    if len(games) < n_short:
+        return 0.0
+
+    points = []
+    for _, row in games.iterrows():
+        if row["HomeTeam"] == team:
+            pts = 3 if row["FTR"] == "H" else (1 if row["FTR"] == "D" else 0)
+        else:
+            pts = 3 if row["FTR"] == "A" else (1 if row["FTR"] == "D" else 0)
+        points.append(pts)
+
+    short = np.mean(points[-n_short:])
+    long  = np.mean(points[-n_long:]) if len(points) >= n_long else np.mean(points)
+    return float(short - long)
+
+
+def _clip01(value):
+    return float(max(0.0, min(1.0, value)))
+
+
+def _race_pressure_from_gap(gap, window=9.0):
+    return _clip01(1.0 - abs(gap) / window)
+
+
+def get_race_context(df, team, season):
+    """
+    Standings/race context truoc tran: title, top 4, Europe, relegation,
+    va dead-rubber proxy. Dong bo voi clean_data.py.
+    """
+    season_df = df[df["Season"] == season]
+    teams = sorted(set(season_df["HomeTeam"]).union(season_df["AwayTeam"]))
+    if team not in teams:
+        # Doi chua da tran nao trong mua: lay danh sach doi tu lich su gan nhat neu co.
+        all_teams = sorted(set(df["HomeTeam"]).union(df["AwayTeam"]))
+        teams = all_teams if team in all_teams else [team]
+
+    stats = {
+        t: {"pts": 0, "mp": 0, "gf": 0, "ga": 0}
+        for t in teams
+    }
+
+    for _, row in season_df.iterrows():
+        h, a = row["HomeTeam"], row["AwayTeam"]
+        stats.setdefault(h, {"pts": 0, "mp": 0, "gf": 0, "ga": 0})
+        stats.setdefault(a, {"pts": 0, "mp": 0, "gf": 0, "ga": 0})
+
+        hg, ag = int(row["FTHG"]), int(row["FTAG"])
+        if row["FTR"] == "H":
+            stats[h]["pts"] += 3
+        elif row["FTR"] == "D":
+            stats[h]["pts"] += 1
+            stats[a]["pts"] += 1
+        else:
+            stats[a]["pts"] += 3
+
+        stats[h]["mp"] += 1
+        stats[a]["mp"] += 1
+        stats[h]["gf"] += hg
+        stats[h]["ga"] += ag
+        stats[a]["gf"] += ag
+        stats[a]["ga"] += hg
+
+    stats.setdefault(team, {"pts": 0, "mp": 0, "gf": 0, "ga": 0})
+
+    table = sorted(
+        stats,
+        key=lambda t: (
+            -stats[t]["pts"],
+            -(stats[t]["gf"] - stats[t]["ga"]),
+            -stats[t]["gf"],
+            t,
+        ),
+    )
+    n_teams = len(table)
+    position = {team_name: idx + 1 for idx, team_name in enumerate(table)}[team]
+
+    pts = stats[team]["pts"]
+    mp = stats[team]["mp"]
+    remaining = max(0, 38 - mp)
+    progress = mp / 38.0
+    late_weight = _clip01((progress - 0.55) / 0.35)
+
+    leader_pts = stats[table[0]]["pts"]
+    top4_pts = stats[table[min(3, n_teams - 1)]]["pts"]
+    europe_pts = stats[table[min(5, n_teams - 1)]]["pts"]
+    rel_pts = stats[table[min(17, n_teams - 1)]]["pts"]
+
+    gap_leader = pts - leader_pts
+    gap_top4 = pts - top4_pts
+    gap_europe = pts - europe_pts
+    gap_relegation = pts - rel_pts
+
+    title_alive = position <= 4 and (pts + remaining * 3 >= leader_pts) and gap_leader >= -9
+    title_pressure = late_weight * (_race_pressure_from_gap(gap_leader, 9.0) if title_alive else 0.0)
+
+    top4_alive = pts + remaining * 3 >= top4_pts
+    top4_pressure = late_weight * (_race_pressure_from_gap(gap_top4, 9.0) if top4_alive else 0.0)
+
+    europe_alive = pts + remaining * 3 >= europe_pts
+    europe_pressure = late_weight * (_race_pressure_from_gap(gap_europe, 9.0) if europe_alive else 0.0)
+
+    if position >= 18:
+        relegation_pressure = late_weight
+    elif position >= 15 or gap_relegation <= 9:
+        relegation_pressure = late_weight * _clip01(1.0 - max(gap_relegation, 0) / 9.0)
+    else:
+        relegation_pressure = 0.0
+
+    race_importance = max(
+        title_pressure,
+        top4_pressure,
+        europe_pressure,
+        relegation_pressure,
+    )
+    baseline_importance = 0.35 * (1.0 - late_weight) + 0.10 * late_weight
+    importance = max(baseline_importance, race_importance)
+    dead_rubber = late_weight if importance <= 0.25 else 0.0
+
+    return {
+        "points": pts,
+        "position": position,
+        "gap_top4": gap_top4,
+        "gap_europe": gap_europe,
+        "title_pressure": title_pressure,
+        "top4_pressure": top4_pressure,
+        "europe_pressure": europe_pressure,
+        "relegation_pressure": relegation_pressure,
+        "importance": importance,
+        "dead_rubber": dead_rubber,
+    }
+
+
 # ------------------------------------------------------------------------------
 # 3. Ham tong hop: tinh tat ca features cho 1 tran dau
 # ------------------------------------------------------------------------------
@@ -330,22 +553,23 @@ def build_match_features(home, away, match_date, season, df):
     """
     # Lay du lieu truoc tran nay
     df_before = df[df["Date"] < match_date].copy()
+    df_season = df_before[df_before["Season"] == season].copy()
 
     home_elo  = get_elo(df_before, home)
     away_elo  = get_elo(df_before, away)
     elo_diff  = home_elo - away_elo
 
-    home_wform = get_weighted_form(df_before, home)
-    away_wform = get_weighted_form(df_before, away)
+    home_wform = get_weighted_form(df_season, home)
+    away_wform = get_weighted_form(df_season, away)
 
-    home_adj = get_adjusted_form(df_before, home)
-    away_adj = get_adjusted_form(df_before, away)
+    home_adj = get_adjusted_form(df_season, home)
+    away_adj = get_adjusted_form(df_season, away)
 
-    home_gf, home_ga = get_goal_avgs(df_before, home)
-    away_gf, away_ga = get_goal_avgs(df_before, away)
+    home_gf, home_ga = get_goal_avgs(df_season, home)
+    away_gf, away_ga = get_goal_avgs(df_season, away)
 
-    home_sot = get_sot_avg(df_before, home)
-    away_sot = get_sot_avg(df_before, away)
+    home_sot = get_sot_avg(df_season, home)
+    away_sot = get_sot_avg(df_season, away)
 
     h2h_dom  = get_h2h_dominance(df_before, home, away)
 
@@ -356,18 +580,42 @@ def build_match_features(home, away, match_date, season, df):
     away_ppg = get_ppg(df_before, away, season)
 
     # Venue form (defaults trung lap 1.0/1.0)
-    home_venue = get_venue_form(df_before, home, role="home")
-    away_venue = get_venue_form(df_before, away, role="away")
+    home_venue = get_venue_form(df_season, home, role="home")
+    away_venue = get_venue_form(df_season, away, role="away")
 
     # Clean sheet
-    home_cs = get_clean_sheet_rate(df_before, home)
-    away_cs = get_clean_sheet_rate(df_before, away)
+    home_cs = get_clean_sheet_rate(df_season, home)
+    away_cs = get_clean_sheet_rate(df_season, away)
 
     # Streaks
-    home_ws = get_streak(df_before, home, "win")
-    away_ws = get_streak(df_before, away, "win")
-    home_ls = get_streak(df_before, home, "loss")
-    away_ls = get_streak(df_before, away, "loss")
+    home_ws = get_streak(df_season, home, "win")
+    away_ws = get_streak(df_season, away, "win")
+    home_ls = get_streak(df_season, home, "loss")
+    away_ls = get_streak(df_season, away, "loss")
+
+    home_rest = get_rest_days(df_before, home, match_date)
+    away_rest = get_rest_days(df_before, away, match_date)
+
+    # [MOI v2] Season progress
+    home_prog = get_season_progress(df_before, home, season)
+    away_prog = get_season_progress(df_before, away, season)
+    season_progress = (home_prog + away_prog) / 2
+
+    # [MOI v2] Standings context
+    h_gap_top, h_gap_rel, h_motiv = get_standings_context(df_before, home, season)
+    a_gap_top, a_gap_rel, a_motiv = get_standings_context(df_before, away, season)
+
+    # [MOI v2] Draw rate
+    home_dr = get_draw_rate(df_season, home)
+    away_dr = get_draw_rate(df_season, away)
+
+    # [MOI v2] Form momentum
+    home_mom = get_form_momentum(df_season, home)
+    away_mom = get_form_momentum(df_season, away)
+
+    # [MOI v3] Race context
+    h_race = get_race_context(df_before, home, season)
+    a_race = get_race_context(df_before, away, season)
 
     return {
         "wform_diff":       home_wform - away_wform,
@@ -383,12 +631,35 @@ def build_match_features(home, away, match_date, season, df):
         "cs_diff":          home_cs    - away_cs,
         "win_streak_diff":  home_ws    - away_ws,
         "loss_streak_diff": home_ls    - away_ls,
+        "rest_diff":        home_rest  - away_rest,
+        # [MOI v2]
+        "season_progress":  season_progress,
+        "gap_top_diff":     h_gap_top  - a_gap_top,
+        "gap_rel_diff":     h_gap_rel  - a_gap_rel,
+        "motivation_diff":  h_motiv    - a_motiv,
+        "low_motivation":   (h_motiv + a_motiv) / 2,
+        # [MOI v3]
+        "points_diff":      h_race["points"] - a_race["points"],
+        "position_diff":    a_race["position"] - h_race["position"],
+        "gap_top4_diff":    h_race["gap_top4"] - a_race["gap_top4"],
+        "gap_europe_diff":  h_race["gap_europe"] - a_race["gap_europe"],
+        "title_pressure_diff": h_race["title_pressure"] - a_race["title_pressure"],
+        "top4_pressure_diff": h_race["top4_pressure"] - a_race["top4_pressure"],
+        "europe_pressure_diff": h_race["europe_pressure"] - a_race["europe_pressure"],
+        "relegation_pressure_diff": h_race["relegation_pressure"] - a_race["relegation_pressure"],
+        "importance_diff":  h_race["importance"] - a_race["importance"],
+        "importance_avg":   (h_race["importance"] + a_race["importance"]) / 2,
+        "dead_rubber_avg":  (h_race["dead_rubber"] + a_race["dead_rubber"]) / 2,
+        "late_importance_diff": season_progress * (h_race["importance"] - a_race["importance"]),
+        "late_dead_rubber": season_progress * ((h_race["dead_rubber"] + a_race["dead_rubber"]) / 2),
+        "draw_rate_avg":    (home_dr + away_dr) / 2,
+        "momentum_diff":    home_mom   - away_mom,
         
         # Raw stats for frontend UI details
         "home_elo":         round(home_elo, 1),
         "away_elo":         round(away_elo, 1),
-        "home_form_str":    get_recent_form_string(df_before, home),
-        "away_form_str":    get_recent_form_string(df_before, away),
+        "home_form_str":    get_recent_form_string(df_season, home),
+        "away_form_str":    get_recent_form_string(df_season, away),
         "home_gf":          round(home_gf, 2),
         "away_gf":          round(away_gf, 2),
         "home_ga":          round(home_ga, 2),
@@ -433,23 +704,10 @@ def predict_gameweek(fixtures, gameweek, season="2025/26"):
         # Du doan xac suat
         proba = model.predict_proba(feat_vector)[0]
 
-        # Tinh priors tu lich su truoc ngay dien ra tran dau
-        df_before = df_hist[df_hist["Date"] < match_date]
-        if len(df_before) > 0:
-            y_hist = df_before["label"].values
-            priors = np.array([
-                np.mean(y_hist == 0),
-                np.mean(y_hist == 1),
-                np.mean(y_hist == 2)
-            ])
-            priors = np.clip(priors, 1e-5, 1.0)
-        else:
-            priors = np.array([0.46, 0.27, 0.27])
-
-        # Apply class-adjustment prior correction with exponent alpha = 0.8
-        alpha = 0.8
-        adj_proba = proba / (priors ** alpha)
-        pred = np.argmax(adj_proba)
+        # [v2] Draw-aware prediction: boost Draw probability truoc khi chon
+        adjusted_proba = proba.copy()
+        adjusted_proba[1] += draw_boost   # Cong draw_boost vao Draw prob
+        pred = np.argmax(adjusted_proba)
 
         label_map = {0: "Home Win", 1: "Draw", 2: "Away Win"}
         pred_label = label_map[pred]

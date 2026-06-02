@@ -1,11 +1,11 @@
-gameweek,home,away,date,home_win%,draw%,away_win%,prediction
-32,Arsenal,Bournemouth,2026-04-11,83.3,10.8,5.9,Home Win
-32,Brentford,Everton,2026-04-11,39.9,29.4,30.6,Home Win
-32,Burnley,Brighton,2026-04-11,8.1,25.8,66.1,Away Win
-32,Crystal Palace,Newcastle United,2026-04-12,36.4,27.0,36.6,Away Win
-32,Liverpool,Fulham,2026-04-11,57.0,23.7,19.2,Home Win
-32,Nott'm Forest,Aston Villa,2026-04-12,26.0,29.4,44.6,Away Win
-32,Chelsea,Manchester City,2026-04-12,25.8,32.4,41.8,Away Win
-32,Sunderland,Tottenham,2026-04-12,50.9,25.5,23.6,Home Win
-32,Manchester United,Leeds United,2026-04-13,73.7,15.8,10.6,Home Win
-32,West Ham,Wolverhampton,2026-04-10,56.5,17.2,26.2,Home Win
+gameweek,home,away,date,home_win%,draw%,away_win%,prediction,home_elo,away_elo,home_form_str,away_form_str,home_gf,away_gf,home_ga,away_ga,home_cs,away_cs,h2h_str
+32,Arsenal,Bournemouth,2026-04-11,73.5,14.8,11.8,Home Win,1679.6,1534.9,D W W W W,D D D D D,2.2,0.6,0.8,0.6,0.4,0.6,Thắng 4 - Hòa 0 - Thua 2
+32,Brentford,Everton,2026-04-11,47.8,23.4,28.8,Home Win,1540.6,1530.2,L W D D D,L W W L W,1.2,1.6,1.4,1.0,0.4,0.4,Thắng 1 - Hòa 2 - Thua 3
+32,Burnley,Brighton,2026-04-11,28.2,22.0,49.9,Away Win,1397.7,1537.4,D L L D L,W W L W W,1.0,1.4,2.0,0.6,0.2,0.4,Thắng 1 - Hòa 3 - Thua 2
+32,Crystal Palace,Newcastle United,2026-04-12,46.5,21.6,31.8,Home Win,1511.2,1541.8,L W L W D,L L W W L,1.4,1.4,1.2,1.6,0.4,0.2,Thắng 1 - Hòa 2 - Thua 3
+32,Liverpool,Fulham,2026-04-11,57.8,20.6,21.6,Home Win,1590.0,1511.1,W W L D L,W W L D W,1.8,1.6,1.4,0.8,0.2,0.2,Thắng 3 - Hòa 2 - Thua 1
+32,Nott'm Forest,Aston Villa,2026-04-12,33.4,23.0,43.6,Away Win,1475.3,1575.0,L L D D W,D L L L W,1.2,1.0,1.0,2.0,0.4,0.2,Thắng 2 - Hòa 0 - Thua 4
+32,Chelsea,Manchester City,2026-04-12,32.3,27.5,40.3,Away Win,1574.4,1653.0,D L W L L,W W W D D,1.2,1.8,1.6,0.8,0.0,0.4,Thắng 0 - Hòa 3 - Thua 3
+32,Sunderland,Tottenham,2026-04-12,53.6,24.9,21.5,Home Win,1504.4,1437.1,L D W L W,L L L D L,1.0,0.8,1.2,2.6,0.2,0.0,Thắng 0 - Hòa 2 - Thua 3
+32,Manchester United,Leeds United,2026-04-13,61.2,22.5,16.3,Home Win,1577.5,1480.1,W W L W D,D L L D D,1.8,0.2,1.2,0.6,0.2,0.4,Thắng 3 - Hòa 3 - Thua 0
+32,West Ham,Wolverhampton,2026-04-10,54.0,23.5,22.5,Home Win,1466.6,1415.9,D L W D L,D L W W D,0.8,1.6,1.6,1.2,0.4,0.2,Thắng 3 - Hòa 0 - Thua 3

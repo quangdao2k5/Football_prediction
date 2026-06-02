@@ -3,6 +3,7 @@ import Predictions from "./components/Predictions";
 import Accuracy from "./components/Accuracy";
 import Standings from "./components/Standings";
 import ModelInfo from "./components/ModelInfo";
+import Insights from "./components/Insights";
 
 const API = "http://localhost:8000/api";
 
@@ -12,22 +13,25 @@ export default function App() {
   const [accuracy, setAcc]      = useState(null);
   const [standings, setStand]   = useState(null);
   const [modelInfo, setModel]   = useState(null);
+  const [gameweeks, setGameweeks] = useState([]);
   const [loading, setLoading]   = useState(true);
 
   useEffect(() => {
     async function fetchAll() {
       setLoading(true);
       try {
-        const [pred, acc, stand, model] = await Promise.all([
+        const [pred, acc, stand, model, gws] = await Promise.all([
           fetch(`${API}/predictions/latest`).then(r => r.ok ? r.json() : null).catch(() => null),
           fetch(`${API}/accuracy`).then(r => r.ok ? r.json() : null).catch(() => null),
           fetch(`${API}/standings`).then(r => r.ok ? r.json() : null).catch(() => null),
           fetch(`${API}/model/info`).then(r => r.ok ? r.json() : null).catch(() => null),
+          fetch(`${API}/predictions/gameweeks`).then(r => r.ok ? r.json() : null).catch(() => null),
         ]);
         setPred(pred);
         setAcc(acc);
         setStand(stand);
         setModel(model);
+        setGameweeks(gws?.gameweeks || []);
       } catch (e) {
         console.error("Loi ket noi API:", e);
       }
@@ -39,6 +43,7 @@ export default function App() {
   const tabs = [
     { id: "predictions", label: "Dự đoán" },
     { id: "accuracy",    label: "Độ chính xác" },
+    { id: "insights",    label: "Phân tích" },
     { id: "standings",   label: "Bảng xếp hạng" },
   ];
 
@@ -79,8 +84,15 @@ export default function App() {
           </div>
         ) : (
           <>
-            {tab === "predictions" && <Predictions data={predictions} />}
+            {tab === "predictions" && (
+              <Predictions
+                data={predictions}
+                apiBase={API}
+                gameweeks={gameweeks}
+              />
+            )}
             {tab === "accuracy"    && <Accuracy data={accuracy} />}
+            {tab === "insights"    && <Insights modelInfo={modelInfo} accuracy={accuracy} />}
             {tab === "standings"   && <Standings data={standings} />}
           </>
         )}
